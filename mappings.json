@@ -1,0 +1,81 @@
+{
+    "fiwind": {
+        "detection_keywords": [
+            "fiwind"
+        ],
+        "columns": {
+            "fecha": "Fecha",
+            "tipo": "Tipo",
+            "moneda": "Moneda",
+            "moneda_origen": "Moneda Origen",
+            "monto": "Monto",
+            "monto_origen": "Monto Origen",
+            "precio": "Precio"
+        },
+        "date_format": "%d/%m/%Y %H:%M:%S"
+    },
+    "ripio_trade": {
+        "detection_keywords": [
+            "ripio trade",
+            "código de operación"
+        ],
+        "columns": {
+            "fecha": "Fecha y hora de la operación",
+            "monto": "Monto de la operación",
+            "moneda": "Moneda",
+            "codigo_operacion": "Código de operación"
+        },
+        "date_format": "%d/%m/%Y %H:%M:%S"
+    },
+    "bitso": {
+        "detection_keywords": [
+            "bitso",
+            "major",
+            "minor"
+        ],
+        "columns": {
+            "datetime": "datetime",
+            "date_fallback": "Date",
+            "type": "type",
+            "major": "major",
+            "minor": "minor",
+            "amount": "amount",
+            "value": "value",
+            "rate": "rate"
+        },
+        "date_format": "%m/%d/%Y %H:%M:%S"
+    },
+    "binance_spot": {
+        "detection_keywords": [
+            "side",
+            "executed",
+            "amount"
+        ],
+        "columns": {
+            "date": "Date(UTC)",
+            "side": "Side",
+            "pair": "Pair",
+            "price": "Price",
+            "executed": "Executed",
+            "amount": "Amount"
+        },
+        "date_format": "%Y-%m-%d %H:%M:%S"
+    },
+    "binance_p2p": {
+        "detection_keywords": [
+            "order type",
+            "fiat type"
+        ],
+        "columns": {
+            "status": "Status",
+            "created_time": "Created Time",
+            "order_type": "Order Type",
+            "fiat_type": "Fiat Type",
+            "asset_type": "Asset Type",
+            "quantity": "Quantity",
+            "price": "Price",
+            "total_price": "Total Price"
+        },
+        "date_format": "%Y-%m-%d %H:%M:%S"
+    }
+}
