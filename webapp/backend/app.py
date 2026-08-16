@@ -260,12 +260,36 @@ def process_files():
             # [LOGIC FIX] Only count effectively inserted transactions
             total_tx += inserted
             
+            total_ex_counts = {}
+            sample_by_ex = {}
+            for tx in processed_data:
+                ex_val = tx.get('Exchange') or tx.get('exchange') or 'Otros'
+                ex = str(ex_val).strip()
+                if not ex or ex.lower() in ('none', 'nan', 'null', ''):
+                    ex = 'Otros'
+                if 'Exchange' in tx:
+                    tx['Exchange'] = ex
+                elif 'exchange' in tx:
+                    tx['exchange'] = ex
+
+                total_ex_counts[ex] = total_ex_counts.get(ex, 0) + 1
+
+                if ex not in sample_by_ex:
+                    sample_by_ex[ex] = []
+                if len(sample_by_ex[ex]) < 10:
+                    sample_by_ex[ex].append(tx)
+
+            representative_sample = []
+            for ex_name, ex_rows in sample_by_ex.items():
+                representative_sample.extend(ex_rows)
+
             results.append({
                 'filename': filename,
                 'count': len(processed_data),
                 'inserted': inserted,
                 'skipped': skipped,
-                'processed_sample': processed_data[:5],
+                'processed_sample': representative_sample,
+                'exchange_counts': total_ex_counts,
                 'raw_sample': raw_sample
             })
         except MissingColumnsError as e:
@@ -504,6 +528,15 @@ def get_history():
         })
     return jsonify(res)
 
+@app.route('/api/history/exchange/<path:exchange_name>', methods=['DELETE'])
+def delete_exchange_transactions(exchange_name):
+    try:
+        deleted = db_manager.delete_transactions_by_exchange(exchange_name)
+        return jsonify({"success": True, "deleted_count": deleted, "exchange": exchange_name})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/sync', methods=['POST'])
 def sync_apis():
     """
@@ -531,9 +564,11 @@ def sync_apis():
         
     db_exchanges = db_manager.get_all_exchanges()
     exchange_display_names = {
-        "Binance Spot": "Binance",
-        "Bitso Alpha": "Bitso",
+        "Binance Spot": "Binance Spot",
+        "Binance P2P": "Binance P2P",
+        "Bitso Alpha": "Bitso Alpha",
         "Ripio Trade": "Ripio Trade",
+        "Ripio Classic": "Ripio Classic",
         "OKX": "OKX",
         "Bybit": "Bybit",
         "Bitget": "Bitget"
@@ -694,21 +729,24 @@ def stats_kpi():
     start = request.args.get('start')
     end = request.args.get('end')
     exchanges = request.args.get('exchanges')
-    return jsonify(db_manager.get_kpis(start, end, exchanges))
+    status = request.args.get('status')
+    return jsonify(db_manager.get_kpis(start, end, exchanges, status_filter=status))
 
 @app.route('/api/stats/daily_volume', methods=['GET'])
 def stats_daily():
     start = request.args.get('start')
     end = request.args.get('end')
     exchanges = request.args.get('exchanges')
-    return jsonify(db_manager.get_daily_volume(start, end, exchanges))
+    status = request.args.get('status')
+    return jsonify(db_manager.get_daily_volume(start, end, exchanges, status_filter=status))
 
 @app.route('/api/stats/exchange_distribution', methods=['GET'])
 def stats_exchange():
     start = request.args.get('start')
     end = request.args.get('end')
     exchanges = request.args.get('exchanges')
-    return jsonify(db_manager.get_exchange_distribution(start, end, exchanges))
+    status = request.args.get('status')
+    return jsonify(db_manager.get_exchange_distribution(start, end, exchanges, status_filter=status))
 
 @app.route('/api/stats/equity', methods=['GET'])
 def stats_equity():
@@ -716,14 +754,33 @@ def stats_equity():
     end = request.args.get('end')
     exchanges = request.args.get('exchanges')
     interval = request.args.get('interval', 'daily')
-    return jsonify(db_manager.get_equity_curve(start, end, exchanges, interval))
+    status = request.args.get('status')
+    return jsonify(db_manager.get_equity_curve(start, end, exchanges, interval, status_filter=status))
 
 @app.route('/api/stats/spread', methods=['GET'])
 def stats_spread():
     start = request.args.get('start')
     end = request.args.get('end')
     exchanges = request.args.get('exchanges')
-    return jsonify(db_manager.get_modal_spread(start, end, exchanges))
+    status = request.args.get('status')
+    return jsonify(db_manager.get_modal_spread(start, end, exchanges, status_filter=status))
+
+@app.route('/api/transactions', methods=['GET'])
+def get_transactions_route():
+    start = request.args.get('start')
+    end = request.args.get('end')
+    exchanges = request.args.get('exchanges')
+    status = request.args.get('status')
+    exch_list = [e.strip() for e in exchanges.split(',')] if exchanges else None
+    return jsonify(db_manager.get_transactions(exchanges=exch_list, date_start=start, date_end=end, status_filter=status))
+
+@app.route('/api/certifications/sync', methods=['POST'])
+def sync_certifications_route():
+    try:
+        db_manager.sync_certified_transactions_status()
+        return jsonify({"success": True, "message": "Estado de certificaciones sincronizado correctamente."})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/stats/recalculate', methods=['POST'])
 def stats_recalculate():
@@ -890,6 +947,23 @@ def download_certification_file(cert_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/certifications/next_start', methods=['GET'])
+def get_next_cert_start():
+    """Retorna el start_date sugerido para la próxima certificación (last_end + 1 segundo)."""
+    try:
+        from datetime import timedelta
+        last_end_dt = db_manager.get_last_certification_end_datetime()
+        if last_end_dt:
+            next_start = (last_end_dt + timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S')
+            return jsonify({
+                "next_start_date": next_start,
+                "last_cert_end": last_end_dt.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        return jsonify({"next_start_date": None, "last_cert_end": None})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/certifications/parse_pdf', methods=['POST'])
 def parse_certification_pdf():
     """Auto-detect start_date, end_date and CPA info from uploaded PDF/image file."""
@@ -904,6 +978,7 @@ def parse_certification_pdf():
         file_bytes = file.read()
         fname = request.form.get('filename') or file.filename
         extracted = extract_info_from_pdf_stream(file_bytes, filename=fname)
+
         return jsonify({"success": True, "extracted": extracted})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1119,7 +1194,7 @@ def extract_info_from_pdf_stream(file_bytes, filename=None, progress_callback=No
             else:
                 day, month = raw_p1.zfill(2), raw_p2.zfill(2)
 
-            time_part = "00:00:00" if is_start else datetime.now().strftime('%H:%M:%S')
+            time_part = "00:00:00" if is_start else "23:59:59"
             if len(parts) >= 4:
                 time_part = ":".join([p.zfill(2) for p in parts[3:]])
                 if len(parts) == 4:
@@ -1205,7 +1280,7 @@ def extract_info_from_pdf_stream(file_bytes, filename=None, progress_callback=No
                     ey = cur_yr_str if int(m1) <= int(m2) else str(int(cur_yr_str) + 1)
 
                 s_date = f"{sy}-{m1}-{d1.zfill(2)} 00:00:00"
-                e_date = f"{ey}-{m2}-{d2.zfill(2)} {datetime.now().strftime('%H:%M:%S')}"
+                e_date = f"{ey}-{m2}-{d2.zfill(2)} 23:59:59"
                 context_start = max(0, m.start() - 100)
                 context_end = min(len(text_normalized), m.end() + 100)
                 snippet = text_normalized[context_start:context_end].lower()

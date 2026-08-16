@@ -23,6 +23,7 @@ def _normalize_text(s):
     s = str(s).replace('\ufeff', '').strip().lower()
     s = unicodedata.normalize('NFKD', s)
     s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+    s = s.replace('_', ' ').replace('-', ' ')
     return s.strip()
 
 # Statuses that mean a P2P/order row should NEVER be counted, regardless of
@@ -31,10 +32,13 @@ def _normalize_text(s):
 # wordings (any language, any future Binance UI change) are included by
 # default, while anything clearly not-final is excluded. This is what actually
 # drives is_cancelled_transaction() and the P2P status filter below.
+import difflib
+
 _NEGATIVE_STATUS_KEYWORDS = (
     'cancel', 'rechaz', 'reject', 'fallid', 'fail', 'expir', 'incomplet',
     'incomplete', 'error', 'devuel', 'refund', 'pend', 'progres', 'progress',
-    'esperando', 'waiting', 'apelaci', 'appeal', 'disput', 'en curso'
+    'esperando', 'waiting', 'apelaci', 'appeal', 'disput', 'en curso',
+    'anulad', 'anulado', 'anulada', 'invalid', 'void', 'denied'
 )
 
 # Optional Imports for Extended Support
@@ -48,25 +52,102 @@ try:
 except ImportError:
     rarfile = None
 
+def get_usd_ars_rate(fecha=None):
+    try:
+        import db_manager
+        year = 2025
+        if fecha:
+            if hasattr(fecha, 'year'):
+                year = fecha.year
+            else:
+                s = str(fecha).strip()
+                if len(s) >= 4 and s[:4].isdigit():
+                    year = int(s[:4])
+        settings = db_manager.get_tax_settings(year)
+        return float(settings.get('usd_ars_exchange_rate', 1000.0) or 1000.0)
+    except Exception:
+        return 1000.0
+
+KEY_CANDIDATES = {
+    'fecha': ['fecha', 'date', 'datetime', 'fecha/hora', 'created_at', 'timestamp', 'time'],
+    'tipo': ['tipo', 'type', 'operacion', 'operación', 'action', 'transaction type'],
+    'moneda': ['moneda', 'currency', 'moneda_destino', 'asset', 'destino', 'symbol', 'coin'],
+    'moneda_origen': ['moneda_origen', 'moneda origen', 'source_currency', 'origen', 'from_currency', 'source asset'],
+    'monto': ['monto', 'amount', 'monto_destino', 'monto destino', 'quantity', 'total'],
+    'monto_origen': ['monto_origen', 'monto origen', 'source_amount', 'monto_inicial', 'source quantity'],
+    'precio': ['precio', 'price', 'rate', 'cotizacion', 'cotización', 'unit price'],
+    'codigo_operacion': ['codigo_operacion', 'codigo de operacion', 'order_id', 'id_operacion', 'order id', 'txid', 'id']
+}
+
+def find_column_fuzzy(df, candidates, cutoff=0.8):
+    """
+    Finds the best matching column in a DataFrame for a list of candidate names.
+    Employs a 3-pass resolution strategy:
+      Pass 1: Exact normalized string equality.
+      Pass 2: Substring & token-set containment.
+      Pass 3: Fuzzy SequenceMatcher scoring (ratio >= cutoff).
+    Returns the original column name from df.columns, or None if no match meets criteria.
+    """
+    if df is None or len(df.columns) == 0 or not candidates:
+        return None
+
+    df_cols = list(df.columns)
+    norm_cols = [_normalize_text(c) for c in df_cols]
+    norm_candidates = [_normalize_text(c) for c in candidates if c]
+
+    # Pass 1: Exact normalized equality
+    for cand in norm_candidates:
+        for idx, norm_col in enumerate(norm_cols):
+            if norm_col == cand:
+                return df_cols[idx]
+
+    # Pass 2: Substring / Token matching
+    for cand in norm_candidates:
+        if len(cand) < 3:
+            continue
+        cand_tokens = set(cand.split())
+        for idx, norm_col in enumerate(norm_cols):
+            if not norm_col:
+                continue
+            if cand in norm_col or (len(norm_col) >= 4 and norm_col in cand):
+                return df_cols[idx]
+            col_tokens = set(norm_col.split())
+            if cand_tokens and cand_tokens.issubset(col_tokens):
+                return df_cols[idx]
+
+    # Pass 3: Fuzzy ratio matching via difflib
+    best_match = None
+    best_score = 0.0
+
+    for cand in norm_candidates:
+        if len(cand) < 3:
+            continue
+        for idx, norm_col in enumerate(norm_cols):
+            if not norm_col:
+                continue
+            ratio = difflib.SequenceMatcher(None, cand, norm_col).ratio()
+            if ratio > best_score and ratio >= cutoff:
+                best_score = ratio
+                best_match = df_cols[idx]
+
+    return best_match
+
 def validate_columns(df, exchange):
-    """Checks if critical columns exist in the dataframe based on config."""
+    """Checks if critical columns exist in the dataframe using fuzzy matching."""
     config = config_manager.load_config()
     if exchange not in config: return # Skip if no config
     
     required_map = config[exchange]['columns']
     missing = []
     
-    # Check only values that are not empty string (some configs might be optional)
-    # But usually all are needed. Let's check all present in config.
-    df_cols = [str(c).lower().strip() for c in df.columns]
-    
     for key, col_name in required_map.items():
         if not col_name: continue # Skip empty config
-        if str(col_name).lower().strip() not in df_cols:
+        cands = [col_name, key] + KEY_CANDIDATES.get(key, [])
+        matched_col = find_column_fuzzy(df, cands)
+        if matched_col is None:
             missing.append(f"{key} ('{col_name}')")
             
     if missing:
-        # We only look at the first 50 chars of columns to avoid huge error messages
         available = [str(c)[:20] for c in df.columns]
         raise MissingColumnsError(exchange, missing, available)
 
@@ -104,12 +185,18 @@ def parse_date(date_str, exchange):
             return parsed
     except Exception:
         pass
-    return pd.to_datetime('today')
+    # All parsers exhausted - return None to signal caller to skip this row
+    print(f"Date Parse Error: '{date_str}' could not be parsed for {exchange}. Row will be skipped.")
+    return None
 
 def clean_decimal(val):
     if isinstance(val, (int, float)): return float(val)
     if pd.isna(val): return 0.0
     s = str(val).strip()
+    if not s: return 0.0
+    
+    # Strip currency symbols and letters (e.g. '$ 50,00' -> '50,00')
+    s = re.sub(r'[^\d.,\-+]', '', s).strip()
     if not s: return 0.0
     
     # Robust handling for 1.234,56 (Spanish) vs 1,234.56 (English)
@@ -141,19 +228,19 @@ def limpiar_numero_binance(valor):
     if match:
         return float(match.group(1))
     return 0.0
-
 def is_cancelled_transaction(row):
     """
-    Scans the row for any status/estado column and returns True if the
-    transaction is cancelled, rejected, failed, expired, pending, or disputed.
-
-    Uses substring matching against a normalized (accent/case-insensitive)
-    value, not exact equality, so wordings like "System cancelled",
-    "Cancelada por el vendedor", or "Apelación en curso" are all caught
-    without needing to enumerate every possible phrase Binance/other
-    exchanges might use.
+    Scans the row for any status, outcome, condition, or state column and
+    returns True if the transaction is cancelled, rejected, failed, expired,
+    pending, disputed, or voided.
+    Protects valid completed transactions containing negative status keywords in positive
+    or negated contexts (e.g., 'Completado sin error', 'Completed (refund: n/a)', 'Dispute Resolved').
     """
-    status_keywords = {'estado', 'status', 'state'}
+    status_keywords = {
+        'estado', 'status', 'state', 'resultado', 'result',
+        'condicion', 'condition', 'situacion', 'situación',
+        'etapa', 'outcome', 'estatus', 'condición'
+    }
     
     cols = row.keys() if hasattr(row, 'keys') else getattr(row, 'index', [])
     for col in cols:
@@ -162,12 +249,64 @@ def is_cancelled_transaction(row):
             val_str = _normalize_text(row[col])
             if not val_str:
                 continue
-            if any(kw in val_str for kw in _NEGATIVE_STATUS_KEYWORDS):
+            
+            # Sanitize positive / negated phrases where negative keywords appear in non-cancelled contexts
+            val_cleaned = re.sub(
+                r'\b(sin|no|without)\s+(error|errors|rechazo|rechazos|rechaz\w*|disputa|disputas|disput\w*|fallo|fallos|cancellation|cancellations|anulacion|anulaciones)\b|'
+                r'\brefund\s*[:=\s]*n/?a\b|\brefund\s*[:=\s]*none\b|\bno\s+refund\b|\bwithout\s+refund\b|'
+                r'\bdispute\s+resolved\b|\bdisputa\s+resuelta\b',
+                '',
+                val_str,
+                flags=re.IGNORECASE
+            )
+            
+            if any(kw in val_cleaned for kw in _NEGATIVE_STATUS_KEYWORDS):
                 return True
     return False
 
+def normalize_exchange_name(ex_name):
+    if not ex_name or not str(ex_name).strip():
+        return 'Otros'
+    clean = str(ex_name).strip()
+    clean_upper = clean.upper()
+    if clean_upper in ('NONE', 'NAN', 'NULL', ''):
+        return 'Otros'
+    
+    if clean in ('Bitso', 'Fiwind', 'Binance', 'Ripio', 'Lemon', 'OKX', 'Bybit', 'Bitget'):
+        return clean
+        
+    if 'BINANCE P2P' in clean_upper or 'BINANCE_P2P' in clean_upper:
+        return 'Binance P2P'
+    elif 'BINANCE' in clean_upper:
+        return 'Binance Spot' if ('SPOT' in clean_upper or clean_upper == 'BINANCE') else 'Binance P2P'
+    elif 'BITSO' in clean_upper:
+        return 'Bitso Alpha' if 'ALPHA' in clean_upper else 'Bitso'
+    elif 'FIWIND' in clean_upper:
+        return 'Fiwind'
+    elif 'RIPIO TRADE' in clean_upper or 'RIPIO_TRADE' in clean_upper or 'RIPIO (CSV)' in clean_upper:
+        return 'Ripio Trade'
+    elif 'RIPIO CLASSIC' in clean_upper or 'RIPIO_CLASSIC' in clean_upper or clean_upper == 'RIPIO':
+        return 'Ripio Classic'
+    elif 'LEMON' in clean_upper:
+        return 'Lemon Cash'
+    elif 'BITGET' in clean_upper:
+        return 'Bitget P2P'
+    elif 'OKX' in clean_upper:
+        return 'OKX'
+    elif 'BYBIT' in clean_upper:
+        return 'Bybit'
+    
+    return clean.title() if clean.isupper() or clean.islower() else clean
+
 def create_transaction(fecha, exchange, tipo_op, moneda, m_compra, m_venta, cot_compra, cot_venta, m_ars, comentario="", unique_id=None):
     from models_v2 import compute_canonical_tx_hash
+    exchange = normalize_exchange_name(exchange)
+    ex_str = str(exchange).strip() if exchange is not None else ''
+    if not ex_str or ex_str.lower() in ('nan', 'none', 'null', ''):
+        exchange_name = 'Otros'
+    else:
+        exchange_name = ex_str
+
     if isinstance(fecha, pd.Timestamp):
         fecha_fmt = fecha.strftime('%Y-%m-%d %H:%M:%S')
     else:
@@ -178,20 +317,22 @@ def create_transaction(fecha, exchange, tipo_op, moneda, m_compra, m_venta, cot_
             if not pd.isna(parsed_dt):
                 fecha_fmt = parsed_dt.strftime('%Y-%m-%d %H:%M:%S')
             else:
-                fecha_fmt = pd.to_datetime('today').strftime('%Y-%m-%d %H:%M:%S')
+                print(f"create_transaction: Could not parse date '{fecha}', row skipped.")
+                return None
         except Exception:
-            fecha_fmt = pd.to_datetime('today').strftime('%Y-%m-%d %H:%M:%S')
+            print(f"create_transaction: Exception parsing date '{fecha}', row skipped.")
+            return None
     
     ref = str(unique_id) if unique_id is not None else str(comentario)
-    tx_hash = compute_canonical_tx_hash(fecha_fmt, exchange, tipo_op, moneda, m_compra, m_venta, m_ars, ref)
+    tx_hash = compute_canonical_tx_hash(fecha_fmt, exchange_name, tipo_op, moneda, m_compra, m_venta, m_ars, ref)
 
     return {
         'Fecha': fecha_fmt,
-        'Exchange': exchange,
+        'Exchange': exchange_name,
         'Tipo de Operación': tipo_op,
         'Moneda': moneda,
-        'Monto Compra (Cripto)': float(round(m_compra, 8)) if m_compra > 0 else 0,
-        'Monto Venta (Cripto)': float(round(m_venta, 8)) if m_venta > 0 else 0,
+        'Monto Compra (Cripto)': float(round(m_compra, 12)) if m_compra and m_compra > 0 else 0,
+        'Monto Venta (Cripto)': float(round(m_venta, 12)) if m_venta and m_venta > 0 else 0,
         'Cotización Compra': float(round(cot_compra, 2)) if cot_compra > 0 else 0,
         'Cotización Venta': float(round(cot_venta, 2)) if cot_venta > 0 else 0,
         'Monto ARS': float(round(abs(m_ars), 2)),
@@ -408,47 +549,47 @@ def process_fiwind(file_obj, filename):
     processed = []
     raw_sample = []
     try:
-        df = pd.read_excel(file_obj)
-        # Standardize columns to lowercase and stripped for robust case-insensitivity
+        df = pd.read_excel(file_obj) if (filename.lower().endswith('.xlsx') or filename.lower().endswith('.xls')) else pd.read_csv(file_obj)
         df.columns = [str(c).lower().strip() for c in df.columns]
-        
-        # Capture raw sample safely
         raw_sample = df.head(10).fillna('').astype(str).to_dict(orient='records')
         
         # Validation
         validate_columns(df, 'fiwind')
 
-        # Load Config (lowercased and stripped to match df.columns)
-        c_date = str(config_manager.get_column('fiwind', 'fecha')).lower().strip()
-        c_type = str(config_manager.get_column('fiwind', 'tipo')).lower().strip()
-        c_curr = str(config_manager.get_column('fiwind', 'moneda')).lower().strip()
-        c_curr_orig = str(config_manager.get_column('fiwind', 'moneda_origen')).lower().strip()
-        c_amt = str(config_manager.get_column('fiwind', 'monto')).lower().strip()
-        c_amt_orig = str(config_manager.get_column('fiwind', 'monto_origen')).lower().strip()
-        c_price = str(config_manager.get_column('fiwind', 'precio')).lower().strip()
+        c_date = find_column_fuzzy(df, [config_manager.get_column('fiwind', 'fecha'), 'fecha', 'date', 'datetime', 'fecha/hora', 'created_at', 'timestamp'])
+        c_type = find_column_fuzzy(df, [config_manager.get_column('fiwind', 'tipo'), 'tipo', 'type', 'operacion', 'operación', 'action', 'transaction type'])
+        c_curr = find_column_fuzzy(df, [config_manager.get_column('fiwind', 'moneda'), 'destination currency', 'destination_currency', 'moneda_destino', 'moneda destino', 'asset', 'destino', 'moneda'])
+        c_curr_orig = find_column_fuzzy(df, [config_manager.get_column('fiwind', 'moneda_origen'), 'source currency', 'source_currency', 'moneda_origen', 'moneda origen', 'origen', 'from_currency'])
+        c_amt = find_column_fuzzy(df, [config_manager.get_column('fiwind', 'monto'), 'destination amount', 'destination_amount', 'monto_destino', 'monto destino', 'amount', 'monto'])
+        c_amt_orig = find_column_fuzzy(df, [config_manager.get_column('fiwind', 'monto_origen'), 'source amount', 'source_amount', 'monto_origen', 'monto origen', 'monto_inicial'])
+        c_price = find_column_fuzzy(df, [config_manager.get_column('fiwind', 'precio'), 'precio', 'price', 'rate', 'cotizacion', 'cotización'])
+
         records = df.to_dict('records')
         for index, row in enumerate(records):
             if is_cancelled_transaction(row):
                 continue
             try:
-                # Basic parsing
                 fecha = parse_date(row.get(c_date), 'fiwind')
                 tipo_raw = str(row.get(c_type, '')).upper()
                 moneda_destino = str(row.get(c_curr, '')).upper()
                 moneda_origen = str(row.get(c_curr_orig, '')).upper()
-                monto_destino = float(row.get(c_amt, 0))
-                monto_origen = float(row.get(c_amt_orig, 0))
-                cotizacion = float(row.get(c_price, 0))
+                monto_destino = clean_decimal(row.get(c_amt, 0))
+                monto_origen = clean_decimal(row.get(c_amt_orig, 0))
+                cotizacion = clean_decimal(row.get(c_price, 0))
 
-                # Logic
-                # Normalize text to handle accents (Conversión vs CONVERSION)
-                import unicodedata
-                def normalize(s):
-                    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn').upper()
+                tipo_normalized = _normalize_text(tipo_raw)
 
-                tipo_normalized = normalize(tipo_raw)
+                is_conversion = any(kw in tipo_normalized for kw in [
+                    'conversion', 'convert', 'swap', 'exchange', 'trade', 'buy', 'sell', 'compra', 'venta'
+                ])
+                is_deposit = any(kw in tipo_normalized for kw in [
+                    'deposito', 'deposit', 'ingreso', 'incoming', 'received', 'receive'
+                ])
+                is_withdrawal = any(kw in tipo_normalized for kw in [
+                    'retiro', 'withdrawal', 'envio', 'transfer', 'sent', 'send', 'outgoing'
+                ])
 
-                if 'CONVERSION' in tipo_normalized:
+                if is_conversion:
                     if moneda_origen == 'ARS':
                         processed.append(create_transaction(
                             fecha, 'Fiwind', 'Compra', moneda_destino,
@@ -460,25 +601,28 @@ def process_fiwind(file_obj, filename):
                             0, abs(monto_origen), 0, cotizacion, abs(monto_destino), tipo_raw, unique_id=index
                         ))
                     else:
-                        try:
-                            import db_manager
-                            if hasattr(fecha, 'year'):
-                                year = fecha.year
-                            else:
-                                year = int(str(fecha)[:4])
-                            settings = db_manager.get_tax_settings(year)
-                            usd_ars_rate = float(settings.get('usd_ars_exchange_rate', 1000.0))
-                        except Exception:
-                            usd_ars_rate = 1000.0
-
-                        if moneda_origen in ('USD', 'USDT', 'USDC', 'DAI'):
-                            usd_value = abs(monto_origen)
-                        elif moneda_destino in ('USD', 'USDT', 'USDC', 'DAI'):
-                            usd_value = abs(monto_destino)
+                        usd_ars_rate = get_usd_ars_rate(fecha)
+                        if cotizacion > 10.0:
+                            ars_value = abs(monto_origen) * cotizacion
+                        elif cotizacion > 0:
+                            ars_value = abs(monto_origen) * cotizacion * usd_ars_rate
+                        elif moneda_origen in ('USD', 'USDT', 'USDC', 'DAI', 'BUSD'):
+                            ars_value = abs(monto_origen) * usd_ars_rate
+                        elif moneda_destino in ('USD', 'USDT', 'USDC', 'DAI', 'BUSD'):
+                            ars_value = abs(monto_destino) * usd_ars_rate
                         else:
-                            usd_value = abs(monto_origen)
+                            ref_prices = {
+                                'BTC': 60000.0, 'ETH': 3000.0, 'SOL': 150.0, 'BNB': 600.0,
+                                'AVAX': 30.0, 'LINK': 15.0, 'DOT': 7.0, 'XRP': 0.6, 'ADA': 0.5
+                            }
+                            if moneda_origen in ref_prices:
+                                usd_val = abs(monto_origen) * ref_prices[moneda_origen]
+                            elif moneda_destino in ref_prices:
+                                usd_val = abs(monto_destino) * ref_prices[moneda_destino]
+                            else:
+                                usd_val = abs(monto_origen) * 100.0
+                            ars_value = usd_val * usd_ars_rate
 
-                        ars_value = usd_value * usd_ars_rate
                         comment = f"[INTERCAMBIO: {moneda_origen}->{moneda_destino}]"
                         
                         cot_v = ars_value / abs(monto_origen) if monto_origen > 0 else 0.0
@@ -492,10 +636,52 @@ def process_fiwind(file_obj, filename):
                             fecha, 'Fiwind', 'Compra', moneda_destino,
                             abs(monto_destino), 0, cot_c, 0, ars_value, comment, unique_id=f"{index}_c"
                         ))
-                # [MODIFIED] User requested to ignore Deposits/Withdrawals
-                # elif 'DEPOSITO' in tipo_raw or 'INGRESO' in tipo_raw: ...
-                # elif 'RETIRO' in tipo_raw or 'ENVIO' in tipo_raw: ...
-
+                elif is_deposit:
+                    target_coin = moneda_destino if (moneda_destino and moneda_destino != 'ARS') else (moneda_origen if moneda_origen else 'USDT')
+                    qty = abs(monto_destino if monto_destino > 0 else monto_origen)
+                    if target_coin == 'ARS':
+                        m_ars = qty
+                        cot_val = 1.0
+                    elif target_coin in ('USD', 'USDT', 'USDC', 'DAI', 'BUSD'):
+                        usd_ars_rate = get_usd_ars_rate(fecha)
+                        rate = cotizacion if cotizacion > 10.0 else usd_ars_rate
+                        m_ars = qty * rate
+                        cot_val = rate
+                    else:
+                        if cotizacion > 10.0:
+                            cot_val = cotizacion
+                            m_ars = qty * cot_val
+                        else:
+                            usd_ars_rate = get_usd_ars_rate(fecha)
+                            cot_val = usd_ars_rate
+                            m_ars = qty * usd_ars_rate
+                    processed.append(create_transaction(
+                        fecha, 'Fiwind', 'Ingreso Cripto', target_coin,
+                        qty, 0, cot_val, 0, m_ars, tipo_raw, unique_id=f"{index}_dep"
+                    ))
+                elif is_withdrawal:
+                    target_coin = moneda_origen if (moneda_origen and moneda_origen != 'ARS') else (moneda_destino if moneda_destino else 'USDT')
+                    qty = abs(monto_origen if monto_origen > 0 else monto_destino)
+                    if target_coin == 'ARS':
+                        m_ars = qty
+                        cot_val = 1.0
+                    elif target_coin in ('USD', 'USDT', 'USDC', 'DAI', 'BUSD'):
+                        usd_ars_rate = get_usd_ars_rate(fecha)
+                        rate = cotizacion if cotizacion > 10.0 else usd_ars_rate
+                        m_ars = qty * rate
+                        cot_val = rate
+                    else:
+                        if cotizacion > 10.0:
+                            cot_val = cotizacion
+                            m_ars = qty * cot_val
+                        else:
+                            usd_ars_rate = get_usd_ars_rate(fecha)
+                            cot_val = usd_ars_rate
+                            m_ars = qty * usd_ars_rate
+                    processed.append(create_transaction(
+                        fecha, 'Fiwind', 'Retiro Cripto', target_coin,
+                        0, qty, 0, cot_val, m_ars, tipo_raw, unique_id=f"{index}_ret"
+                    ))
             except Exception as e:
                 print(f"Error procesando fila en Fiwind: {e}")
                 continue
@@ -510,54 +696,77 @@ def process_ripio_trade(file_obj, filename):
     raw_sample = []
     try:
         df = pd.read_csv(file_obj)
-        # Standardize columns to lowercase and stripped for robust case-insensitivity
         df.columns = [str(c).lower().strip() for c in df.columns]
-        
         raw_sample = df.head(10).fillna('').astype(str).to_dict(orient='records')
 
-        # Validation
         validate_columns(df, 'ripio_trade')
 
-        # Load Config (lowercased and stripped to match df.columns)
-        col_fecha = str(config_manager.get_column('ripio_trade', 'fecha')).lower().strip()
-        col_monto = str(config_manager.get_column('ripio_trade', 'monto')).lower().strip()
-        col_moneda = str(config_manager.get_column('ripio_trade', 'moneda')).lower().strip()
-        col_cod = str(config_manager.get_column('ripio_trade', 'codigo_operacion')).lower().strip()
+        col_fecha = find_column_fuzzy(df, [config_manager.get_column('ripio_trade', 'fecha'), 'fecha', 'date', 'created_at', 'timestamp'])
+        col_monto = find_column_fuzzy(df, [config_manager.get_column('ripio_trade', 'monto'), 'monto', 'amount', 'cantidad', 'total'])
+        col_moneda = find_column_fuzzy(df, [config_manager.get_column('ripio_trade', 'moneda'), 'moneda', 'currency', 'asset', 'symbol'])
+        col_cod = find_column_fuzzy(df, [config_manager.get_column('ripio_trade', 'codigo_operacion'), 'codigo_operacion', 'codigo de operacion', 'order_id', 'id_operacion'])
         
-        # Fallback search if config fails? For now rely on config
-        # Actually, let's just use what's in config
-        
-        if col_cod in df.columns:
+        FIAT_STABLES = {'ARS', 'USD', 'USDT', 'USDC', 'DAI', 'BUSD', 'EUR', 'UXD'}
+
+        if col_cod and col_cod in df.columns:
             grupos = df.groupby(col_cod)
             for nombre, grupo in grupos:
                 if any(is_cancelled_transaction(r) for _, r in grupo.iterrows()):
                     continue
-                row_ars = grupo[grupo[col_moneda] == 'ARS']
-                row_cripto = grupo[grupo[col_moneda] != 'ARS']
                 
-                if not row_ars.empty and not row_cripto.empty:
-                    try:
-                        m_ars = clean_decimal(row_ars.iloc[0][col_monto])
-                        m_cripto = clean_decimal(row_cripto.iloc[0][col_monto])
-                        mon_cripto = row_cripto.iloc[0][col_moneda]
-                        fecha_str = row_ars.iloc[0][col_fecha]
-                        
-                        try: fecha = parse_date(fecha_str, 'ripio_trade')
-                        except Exception as e:
-                            print(f"Fallback parse_date Ripio Trade falló p/{fecha_str}: {e}")
-                            fecha = pd.to_datetime(fecha_str)
+                row_ars = grupo[grupo[col_moneda].astype(str).str.upper() == 'ARS']
+                if not row_ars.empty:
+                    row_quote = row_ars
+                    row_cripto = grupo[grupo[col_moneda].astype(str).str.upper() != 'ARS']
+                    quote_currency = 'ARS'
+                else:
+                    row_stables = grupo[grupo[col_moneda].astype(str).str.upper().isin(FIAT_STABLES)]
+                    if not row_stables.empty:
+                        row_quote = row_stables.iloc[[0]]
+                        row_cripto = grupo[~grupo.index.isin(row_quote.index)]
+                        quote_currency = str(row_quote.iloc[0][col_moneda]).upper()
+                    else:
+                        row_quote = grupo.iloc[[0]]
+                        row_cripto = grupo.iloc[[1]] if len(grupo) > 1 else grupo
+                        quote_currency = str(row_quote.iloc[0][col_moneda]).upper()
 
-                        if m_ars < 0: # Compra
-                            cot = abs(m_ars) / abs(m_cripto) if m_cripto != 0 else 0
+                if not row_quote.empty and not row_cripto.empty:
+                    try:
+                        m_quote = clean_decimal(row_quote.iloc[0][col_monto])
+                        m_cripto = clean_decimal(row_cripto.iloc[0][col_monto])
+                        mon_cripto = str(row_cripto.iloc[0][col_moneda]).upper()
+                        fecha_str = row_quote.iloc[0][col_fecha]
+                        fecha = parse_date(fecha_str, 'ripio_trade')
+                        usd_ars_rate = get_usd_ars_rate(fecha)
+                        ref_prices = {
+                            'BTC': 60000.0, 'ETH': 3000.0, 'SOL': 150.0, 'BNB': 600.0,
+                            'AVAX': 30.0, 'LINK': 15.0, 'DOT': 7.0, 'XRP': 0.6, 'ADA': 0.5, 'EUR': 1.08
+                        }
+
+                        if quote_currency == 'ARS':
+                            m_ars = abs(m_quote)
+                        elif quote_currency in ('USD', 'USDT', 'USDC', 'DAI', 'BUSD'):
+                            m_ars = abs(m_quote) * usd_ars_rate
+                        elif quote_currency in ref_prices:
+                            usd_val = abs(m_quote) * ref_prices[quote_currency]
+                            m_ars = usd_val * usd_ars_rate
+                        elif mon_cripto in ref_prices:
+                            usd_val = abs(m_cripto) * ref_prices[mon_cripto]
+                            m_ars = usd_val * usd_ars_rate
+                        else:
+                            m_ars = abs(m_quote) * 100.0 * usd_ars_rate
+
+                        if m_quote < 0: # Compra
+                            cot = m_ars / abs(m_cripto) if m_cripto != 0 else 0
                             processed.append(create_transaction(
                                 fecha, 'Ripio Trade', 'Compra', mon_cripto,
-                                abs(m_cripto), 0, cot, 0, abs(m_ars), f"ID: {nombre}", unique_id=nombre
+                                abs(m_cripto), 0, cot, 0, m_ars, f"ID: {nombre}", unique_id=nombre
                             ))
                         else: # Venta
-                            cot = abs(m_ars) / abs(m_cripto) if m_cripto != 0 else 0
+                            cot = m_ars / abs(m_cripto) if m_cripto != 0 else 0
                             processed.append(create_transaction(
                                 fecha, 'Ripio Trade', 'Venta', mon_cripto,
-                                0, abs(m_cripto), 0, cot, abs(m_ars), f"ID: {nombre}", unique_id=nombre
+                                0, abs(m_cripto), 0, cot, m_ars, f"ID: {nombre}", unique_id=nombre
                             ))
                     except Exception as e:
                         print(f"Error procesando grupo de Ripio Trade ({nombre}): {e}")
@@ -571,7 +780,40 @@ def process_bitso(file_obj, filename):
     processed = []
     raw_sample = []
     try:
-        df = pd.read_csv(file_obj)
+        file_obj.seek(0)
+        ext = filename.lower()
+        if ext.endswith('.xlsx') or ext.endswith('.xls'):
+            df = pd.read_excel(file_obj)
+        else:
+            df = None
+            for enc in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
+                for sep in [None, ',', ';', '\t']:
+                    try:
+                        file_obj.seek(0)
+                        kwargs = {'encoding': enc}
+                        if sep is None:
+                            kwargs['sep'] = None
+                            kwargs['engine'] = 'python'
+                        else:
+                            kwargs['sep'] = sep
+                        df_csv = pd.read_csv(file_obj, **kwargs)
+                        if df_csv is not None and not df_csv.empty and len(df_csv.columns) > 1:
+                            df = df_csv
+                            break
+                    except Exception:
+                        pass
+                if df is not None:
+                    break
+            if df is None:
+                file_obj.seek(0)
+                try:
+                    df = pd.read_excel(file_obj)
+                except Exception:
+                    pass
+
+        if df is None or df.empty:
+            return [], []
+
         # Standardize columns to lowercase and stripped for robust case-insensitivity
         df.columns = [str(c).lower().strip() for c in df.columns]
         
@@ -587,31 +829,57 @@ def process_bitso(file_obj, filename):
         c_val = str(config_manager.get_column('bitso', 'value')).lower().strip()
         c_rate = str(config_manager.get_column('bitso', 'rate')).lower().strip()
         
+        def _get_val(row, primary, candidates):
+            if primary and primary in row.index and not pd.isna(row[primary]) and str(row[primary]).strip() != '':
+                return row[primary]
+            for cand in candidates:
+                cand_clean = str(cand).lower().strip()
+                for col in row.index:
+                    if str(col).lower().strip() == cand_clean and not pd.isna(row[col]) and str(row[col]).strip() != '':
+                        return row[col]
+            return ''
+
         for index, row in df.iterrows():
             if is_cancelled_transaction(row):
                 continue
             try:
-                fecha_str = row.get(c_date, row.get(c_date_fallback, ''))
+                fecha_str = _get_val(row, c_date, [c_date_fallback, 'datetime', 'date', 'fecha', 'timestamp', 'created_at'])
                 fecha = parse_date(fecha_str, 'bitso')
                 
-                tipo_raw = str(row.get(c_type, '')).lower()
-                major = str(row.get(c_major, '')).upper()
-                minor = str(row.get(c_minor, '')).upper()
-                cant_cripto = abs(float(row.get(c_amt, 0)))
-                monto_fiat = abs(float(row.get(c_val, 0)))
-                rate = float(row.get(c_rate, 0))
+                tipo_raw = str(_get_val(row, c_type, ['type', 'tipo', 'side', 'operation'])).lower().strip()
+                major = str(_get_val(row, c_major, ['major', 'asset', 'moneda', 'cripto', 'coin', 'symbol'])).upper().strip()
+                minor = str(_get_val(row, c_minor, ['minor', 'fiat', 'quote', 'currency'])).upper().strip()
+                cant_cripto = abs(clean_decimal(_get_val(row, c_amt, ['amount', 'cantidad', 'monto', 'qty'])))
+                monto_fiat = abs(clean_decimal(_get_val(row, c_val, ['value', 'total', 'monto_ars', 'monto total', 'val'])))
+                rate = clean_decimal(_get_val(row, c_rate, ['rate', 'price', 'precio', 'cotizacion', 'cotización']))
 
-                if minor == 'ARS':
-                    if tipo_raw == 'buy':
-                        processed.append(create_transaction(
-                            fecha, 'Bitso', 'Compra', major,
-                            cant_cripto, 0, rate, 0, monto_fiat, 'Bitso Trade', unique_id=index
-                        ))
-                    else:
-                        processed.append(create_transaction(
-                            fecha, 'Bitso', 'Venta', major,
-                            0, cant_cripto, 0, rate, monto_fiat, 'Bitso Trade', unique_id=index
-                        ))
+                if rate == 0 and cant_cripto > 0 and monto_fiat > 0:
+                    rate = monto_fiat / cant_cripto
+                elif monto_fiat == 0 and cant_cripto > 0 and rate > 0:
+                    monto_fiat = cant_cripto * rate
+
+                is_buy = 'buy' in tipo_raw or 'compra' in tipo_raw
+                is_sell = 'sell' in tipo_raw or 'venta' in tipo_raw
+
+                row_ex = _get_val(row, '', ['exchange', 'plataforma', 'entidad', 'broker'])
+                row_ex_str = str(row_ex).strip() if row_ex and str(row_ex).strip().lower() not in ['', 'nan', 'none'] else ''
+                ex_name = row_ex_str if row_ex_str else 'Bitso Alpha'
+
+                if is_buy:
+                    processed.append(create_transaction(
+                        fecha, ex_name, 'Compra', major if major else 'USDT',
+                        cant_cripto, 0, rate, 0, monto_fiat, 'Bitso Trade', unique_id=index
+                    ))
+                elif is_sell:
+                    processed.append(create_transaction(
+                        fecha, ex_name, 'Venta', major if major else 'USDT',
+                        0, cant_cripto, 0, rate, monto_fiat, 'Bitso Trade', unique_id=index
+                    ))
+                elif cant_cripto > 0 or monto_fiat > 0:
+                    processed.append(create_transaction(
+                        fecha, ex_name, 'Compra', major if major else 'USDT',
+                        cant_cripto, 0, rate, 0, monto_fiat, 'Bitso Trade', unique_id=index
+                    ))
             except Exception as e:
                 print(f"Error procesando fila en Bitso: {e}")
                 continue
@@ -735,6 +1003,9 @@ def process_binance_csv(file_obj, filename):
             if len(raw_sample) < 10:
                 raw_sample.extend(df.head(10).fillna('').astype(str).to_dict(orient='records'))
 
+            # Find explicit exchange column if present
+            ex_col = find_binance_column(df, ['exchange', 'plataforma', 'entidad', 'broker', 'origen', 'cuenta', 'exchange/plataforma', 'plataforma/exchange'])
+
             # Find columns for P2P (Bilingual Spanish / English + Account Statements)
             p2p_type = find_binance_column(df, ['tipo de orden', 'tipo de transacción', 'tipo de operación', 'tipo de operacion', 'order type', 'order_type', 'tipo', 'side', 'type', 'operación', 'operacion', 'operation', 'dirección', 'direccion'])
             p2p_fiat = find_binance_column(df, ['tipo de fiat', 'moneda fiduciaria', 'moneda fiat', 'fiat type', 'fiat_type', 'fiat currency', 'fiat', 'fiduciaria'])
@@ -753,17 +1024,11 @@ def process_binance_csv(file_obj, filename):
             spot_price = find_binance_column(df, ['price', 'precio'])
             spot_amt = find_binance_column(df, ['amount', 'monto', 'total'])
 
-            is_p2p = (p2p_type is not None or p2p_total is not None or p2p_asset is not None) and (p2p_qty is not None or p2p_created is not None or p2p_price is not None)
-            is_spot = spot_side is not None and spot_exec is not None
+            is_spot = (spot_side is not None and spot_exec is not None) or (spot_pair is not None and spot_side is not None)
+            is_p2p = (p2p_fiat is not None or p2p_status is not None) and not is_spot
 
             if is_p2p:
                 for index, row in df.iterrows():
-                    # Filter out cancelled/failed/expired/pending/disputed rows.
-                    # is_cancelled_transaction() checks ANY status-like column
-                    # against the shared, accent-insensitive negative-keyword
-                    # list, so any Binance status text not in that blacklist
-                    # (in any language/wording) is treated as valid by default
-                    # instead of being silently dropped.
                     if is_cancelled_transaction(row):
                         continue
                     try:
@@ -780,16 +1045,19 @@ def process_binance_csv(file_obj, filename):
                         price = clean_decimal(row.get(p2p_price, 0)) if p2p_price else 0.0
                         total = clean_decimal(row.get(p2p_total, qty * price)) if p2p_total else (qty * price)
                         
+                        row_ex = str(row.get(ex_col, '')).strip() if ex_col else ''
+                        ex_name = row_ex if row_ex and row_ex.lower() not in ['', 'nan', 'none'] else 'Binance P2P'
+
                         is_ars = any(k in fiat for k in ['ARS', 'PESO', 'ARGENTIN', '$']) or not fiat or fiat == ''
                         if is_ars:
                             if is_buy:
                                 processed.append(create_transaction(
-                                    fecha, 'Binance P2P', 'Compra', asset,
+                                    fecha, ex_name, 'Compra', asset,
                                     qty, 0, price, 0, total, 'P2P', unique_id=index
                                 ))
                             else:
                                 processed.append(create_transaction(
-                                    fecha, 'Binance P2P', 'Venta', asset,
+                                    fecha, ex_name, 'Venta', asset,
                                     0, qty, 0, price, total, 'P2P', unique_id=index
                                 ))
                     except Exception as e:
@@ -809,16 +1077,31 @@ def process_binance_csv(file_obj, filename):
                         cant = limpiar_numero_binance(row.get(spot_exec, 0))
                         total = limpiar_numero_binance(row.get(spot_amt, cant * precio))
                         
+                        row_ex = str(row.get(ex_col, '')).strip() if ex_col else ''
+                        ex_name = row_ex if row_ex and row_ex.lower() not in ['', 'nan', 'none'] else 'Binance Spot'
+
                         if 'ARS' in pair:
                             crypto = pair.replace('ARS', '').replace('/', '').replace('_', '')
                             m_ars = total
                             cot_compra = precio if is_buy else 0.0
                             cot_venta = precio if not is_buy else 0.0
+                            if is_buy:
+                                processed.append(create_transaction(
+                                    fecha, ex_name, 'Compra', crypto,
+                                    cant, 0, cot_compra, 0, m_ars, 'Spot', unique_id=index
+                                ))
+                            else:
+                                processed.append(create_transaction(
+                                    fecha, ex_name, 'Venta', crypto,
+                                    0, cant, 0, cot_venta, m_ars, 'Spot', unique_id=index
+                                ))
                         else:
-                            crypto = pair
+                            base_coin = pair
+                            quote_coin = ""
                             for quote in ['USDT', 'USDC', 'BUSD', 'DAI', 'USD', 'EUR', 'BTC', 'ETH']:
                                 if pair.endswith(quote):
-                                    crypto = pair[:-len(quote)]
+                                    base_coin = pair[:-len(quote)]
+                                    quote_coin = quote
                                     break
                                     
                             import db_manager
@@ -829,19 +1112,44 @@ def process_binance_csv(file_obj, filename):
                                 rate = 1000.0
                                 
                             m_ars = total * rate
-                            cot_compra = (precio * rate) if is_buy else 0.0
-                            cot_venta = (precio * rate) if not is_buy else 0.0
-
-                        if is_buy:
-                            processed.append(create_transaction(
-                                fecha, 'Binance Spot', 'Compra', crypto,
-                                cant, 0, cot_compra, 0, m_ars, 'Spot', unique_id=index
-                            ))
-                        else:
-                            processed.append(create_transaction(
-                                fecha, 'Binance Spot', 'Venta', crypto,
-                                0, cant, 0, cot_venta, m_ars, 'Spot', unique_id=index
-                            ))
+                            
+                            if quote_coin:
+                                comment_swap = f"[INTERCAMBIO: {quote_coin}->{base_coin}]" if is_buy else f"[INTERCAMBIO: {base_coin}->{quote_coin}]"
+                                if is_buy:
+                                    cot_c = m_ars / cant if cant > 0 else 0.0
+                                    processed.append(create_transaction(
+                                        fecha, ex_name, 'Compra', base_coin,
+                                        cant, 0, cot_c, 0, m_ars, comment_swap, unique_id=f"{index}_c"
+                                    ))
+                                    cot_v = m_ars / total if total > 0 else 0.0
+                                    processed.append(create_transaction(
+                                        fecha, ex_name, 'Venta', quote_coin,
+                                        0, total, 0, cot_v, m_ars, comment_swap, unique_id=f"{index}_v"
+                                    ))
+                                else:
+                                    cot_v = m_ars / cant if cant > 0 else 0.0
+                                    processed.append(create_transaction(
+                                        fecha, ex_name, 'Venta', base_coin,
+                                        0, cant, 0, cot_v, m_ars, comment_swap, unique_id=f"{index}_v"
+                                    ))
+                                    cot_c = m_ars / total if total > 0 else 0.0
+                                    processed.append(create_transaction(
+                                        fecha, ex_name, 'Compra', quote_coin,
+                                        total, 0, cot_c, 0, m_ars, comment_swap, unique_id=f"{index}_c"
+                                    ))
+                            else:
+                                cot_compra = (precio * rate) if is_buy else 0.0
+                                cot_venta = (precio * rate) if not is_buy else 0.0
+                                if is_buy:
+                                    processed.append(create_transaction(
+                                        fecha, ex_name, 'Compra', base_coin,
+                                        cant, 0, cot_compra, 0, m_ars, 'Spot', unique_id=index
+                                    ))
+                                else:
+                                    processed.append(create_transaction(
+                                        fecha, ex_name, 'Venta', base_coin,
+                                        0, cant, 0, cot_venta, m_ars, 'Spot', unique_id=index
+                                    ))
                     except Exception as e:
                         print(f"Error procesando fila Binance Spot: {e}")
                         pass
@@ -978,7 +1286,7 @@ def procesar_ripio_comun_txt(file_obj, filename):
                             # print(f"DEBUG ZERO: {val_str} -> {val} {coin}")
                 
                 if len(montos) > 0:
-                    exchange = "Ripio"
+                    exchange = "Ripio Trade"
 
                     # Logic mapping based on detected type
                     if tipo_op == "COMPRA":
@@ -1140,32 +1448,56 @@ def process_uploaded_file(file_obj, filename, depth=0, state=None):
                 break
     file_obj.seek(0)
 
-    is_binance_p2p_content = any(_normalize_text(k) in cols_set for k in [
-        'tipo de orden', 'número de pedido', 'numero de pedido', 'tipo de fiat',
-        'precio total', 'hora de creación', 'hora de creacion', 'tarifa de creador',
-        'comisión de tomador', 'comision de tomador', 'order type', 'fiat type', 'asset type'
-    ]) or "binance" in filename.lower()
+    # 1. EXPLICIT EXCHANGE COLUMN OR CONSOLIDATED REPORT CHECK
+    # Check if the file contains an explicit Exchange/plataforma/broker column or
+    # consolidated presentation headers (Cotización Compra, Cotización Venta, etc.).
+    # If so, route to process_multi_exchange_excel FIRST to preserve row exchange names.
+    has_explicit_exchange_col = any(k in cols_set for k in [
+        'exchange', 'plataforma', 'entidad', 'broker', 'origen', 'cuenta',
+        'exchange/plataforma', 'plataforma/exchange'
+    ])
+    has_consolidated_cols = any(k in cols_set for k in [
+        'cotizacion compra', 'cotizacion venta', 'monto compra (cripto)',
+        'monto venta (cripto)', 'cotizacion_compra', 'cotizacion_venta'
+    ])
 
-    if is_binance_p2p_content:
-        file_obj.seek(0)
+    if has_explicit_exchange_col or has_consolidated_cols:
         try:
-            res = process_binance_csv(file_obj, filename)
+            file_obj.seek(0)
+            multi_records, multi_sample = process_multi_exchange_excel(file_obj, filename)
+            if multi_records:
+                return multi_records, multi_sample
+        except Exception as e:
+            print(f"Multi-exchange explicit check error: {e}")
+
+    # 2. BITSO FILE CHECK (CSV or XLSX, by filename or Bitso header columns)
+    is_bitso_header = (
+        ('major' in cols_set and 'minor' in cols_set) or
+        ('rate' in cols_set and 'value' in cols_set and ('major' in cols_set or 'minor' in cols_set or 'type' in cols_set or 'amount' in cols_set or 'datetime' in cols_set or 'date' in cols_set)) or
+        ('bitso' in cols_set)
+    )
+    is_bitso_file = "bitso" in filename.lower() or is_bitso_header
+
+    if is_bitso_file:
+        try:
+            file_obj.seek(0)
+            res = process_bitso(file_obj, filename)
             if res and res[0]:
                 return res
         except MissingColumnsError:
             pass
         except Exception as e:
-            print(f"Error checking Binance P2P: {e}")
-            pass
+            print(f"Error in Bitso file processing: {e}")
 
-    if "fiwind" in filename.lower() and (filename.endswith('.xls') or filename.endswith('.xlsx')):
+    # 3. OTHER EXCHANGES BY FILENAME OR SPECIFIC HEADERS
+    if "fiwind" in filename.lower() and (filename.endswith('.xls') or filename.endswith('.xlsx') or filename.endswith('.csv')):
         try:
             file_obj.seek(0)
             return process_fiwind(file_obj, filename)
         except MissingColumnsError:
             pass
     
-    elif ("ripio trade" in filename.lower() or "ripio_trade" in filename.lower()) and filename.endswith('.csv'):
+    elif ("ripio trade" in filename.lower() or "ripio_trade" in filename.lower() or 'codigo_operacion' in cols_set or 'codigo de operacion' in cols_set) and not filename.endswith('.txt'):
         try:
             file_obj.seek(0)
             return process_ripio_trade(file_obj, filename)
@@ -1178,16 +1510,18 @@ def process_uploaded_file(file_obj, filename, depth=0, state=None):
             return procesar_ripio_comun_txt(file_obj, filename)
         except Exception:
             pass
-        
-    elif "bitso" in filename.lower() and filename.endswith('.csv'):
-        try:
-            file_obj.seek(0)
-            return process_bitso(file_obj, filename)
-        except MissingColumnsError:
-            pass
-    
-    # Binance CSV or Excel (.xlsx / .xls)
-    if (filename.lower().endswith('.csv') or filename.lower().endswith('.xlsx') or filename.lower().endswith('.xls')):
+
+    # 4. BINANCE SPECIFIC FILE CHECK
+    # Only route to Binance processor if the file is explicitly named Binance or has strong Binance P2P / Spot headers
+    is_binance_named = "binance" in filename.lower()
+    is_binance_p2p_headers = any(k in cols_set for k in [
+        'tipo de orden', 'número de pedido', 'numero de pedido', 'tipo de fiat',
+        'precio total', 'hora de creación', 'hora de creacion', 'tarifa de creador',
+        'comisión de tomador', 'comision de tomador', 'order type', 'fiat type', 'asset type'
+    ])
+    is_binance_spot_headers = ('executed' in cols_set and 'side' in cols_set and ('pair' in cols_set or 'price' in cols_set))
+
+    if is_binance_named or is_binance_p2p_headers or is_binance_spot_headers:
         try:
             file_obj.seek(0)
             res = process_binance_csv(file_obj, filename)
@@ -1195,10 +1529,10 @@ def process_uploaded_file(file_obj, filename, depth=0, state=None):
                 return res
         except MissingColumnsError:
             pass
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error checking Binance P2P/Spot: {e}")
 
-    # GENERIC CONTENT-BASED & DYNAMIC CUSTOM EXCHANGE DETECTION
+    # 5. DYNAMIC CUSTOM EXCHANGE DETECTION
     try:
         import db_manager
         all_ex = db_manager.get_all_exchanges()
@@ -1211,9 +1545,31 @@ def process_uploaded_file(file_obj, filename, depth=0, state=None):
                 res_df = process_dynamic_csv(df, ex['name'], ex.get('mapping', {}), ex.get('dateFormat', '%d/%m/%Y %H:%M:%S'))
                 records = res_df.to_dict('records') if not res_df.empty else []
                 sample = df.head(5).to_dict('records') if not df.empty else []
-                return records, sample
+                if records:
+                    return records, sample
     except Exception as e:
         print("Dynamic CSV check error:", e)
+
+    # 6. MULTI-EXCHANGE & GENERIC CONSOLIDATED EXCEL/CSV PARSER FALLBACK
+    try:
+        file_obj.seek(0)
+        multi_records, multi_sample = process_multi_exchange_excel(file_obj, filename)
+        if multi_records:
+            return multi_records, multi_sample
+    except Exception as e:
+        print("Multi-exchange Excel check error:", e)
+
+    # 7. FINAL FALLBACK TO BINANCE CSV / EXCEL
+    if (filename.lower().endswith('.csv') or filename.lower().endswith('.xlsx') or filename.lower().endswith('.xls')):
+        try:
+            file_obj.seek(0)
+            res = process_binance_csv(file_obj, filename)
+            if res and res[0]:
+                return res
+        except MissingColumnsError:
+            pass
+        except Exception:
+            pass
 
     return [], []
 
@@ -1342,9 +1698,9 @@ def generate_master_excel(transactions):
             ws.cell(row=current_row, column=8).font = Font(bold=True)
             ws.cell(row=current_row, column=8).alignment = Alignment(horizontal='right')
             
-            # SUM Formula for 'Monto ARS' (Column 9 -> I)
+            # Dynamic SUBTOTAL Formula for 'Monto ARS' (Column 9 -> I) (109 = SUM excluding hidden/filtered rows)
             sum_cell = ws.cell(row=current_row, column=9)
-            sum_cell.value = f"=SUM(I{start_data_row}:I{end_data_row})"
+            sum_cell.value = f"=SUBTOTAL(109, I{start_data_row}:I{end_data_row})"
             sum_cell.font = Font(bold=True, color=cat_color)
             sum_cell.number_format = '#,##0.00'
             sum_cell.alignment = Alignment(horizontal='center')
@@ -1442,3 +1798,189 @@ def process_dynamic_csv(df, exchange_name, mapping, date_format="%d/%m/%Y %H:%M:
         })
 
     return pd.DataFrame(records)
+
+
+def process_multi_exchange_excel(file_obj, filename):
+    """Parses a multi-exchange manual Excel/CSV file using a single-pass state machine.
+    Returns (records, sample_records).
+    """
+    import openpyxl
+    import datetime
+
+    file_obj.seek(0)
+    ext = filename.lower()
+    rows = []
+
+    try:
+        if ext.endswith('.xlsx') or ext.endswith('.xls'):
+            wb = openpyxl.load_workbook(file_obj, data_only=True)
+            ws = wb.active
+            rows = list(ws.iter_rows(values_only=True))
+        else:
+            import csv
+            for enc in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
+                file_obj.seek(0)
+                try:
+                    content = file_obj.read()
+                    if isinstance(content, bytes):
+                        content = content.decode(enc)
+                    dialect = None
+                    try:
+                        dialect = csv.Sniffer().sniff(content[:2048])
+                    except Exception:
+                        pass
+                    sep = dialect.delimiter if dialect else ','
+                    reader = csv.reader(io.StringIO(content), delimiter=sep)
+                    rows = [r for r in reader]
+                    if rows:
+                        break
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"Error reading multi-exchange file: {e}")
+        return [], []
+
+    if not rows:
+        return [], []
+
+    current_exchange = 'Otros'
+    col_map = None
+    records = []
+
+    for idx, row in enumerate(rows, start=1):
+        try:
+            if not row or not any(c is not None and str(c).strip() != '' for c in row):
+                continue
+
+            row_strs = [str(c).strip() if c is not None else '' for c in row]
+            first_cell = row_strs[0] if row_strs else ''
+
+            banner_match = re.search(r'REPORTE:\s*(.+)', first_cell, re.IGNORECASE)
+            if not banner_match:
+                for cell in row_strs:
+                    bm = re.search(r'REPORTE:\s*(.+)', cell, re.IGNORECASE)
+                    if bm:
+                        banner_match = bm
+                        break
+
+            if banner_match:
+                current_exchange = banner_match.group(1).strip()
+                continue
+
+            normalized_row = [_normalize_text(c) for c in row_strs]
+            if any(h in normalized_row for h in ['fecha', 'date', 'timestamp', 'fecha/hora', 'datetime']):
+                col_map = {}
+                for col_i, norm_val in enumerate(normalized_row):
+                    if not norm_val:
+                        continue
+                    if norm_val in ['fecha', 'date', 'timestamp', 'fecha/hora', 'datetime', 'created_at', 'hora'] and 'date' not in col_map:
+                        col_map['date'] = col_i
+                    elif norm_val in ['exchange', 'plataforma', 'entidad', 'broker', 'origen', 'cuenta', 'exchange/plataforma', 'plataforma/exchange'] and 'exchange' not in col_map:
+                        col_map['exchange'] = col_i
+                    elif norm_val in ['tipo', 'tipo de operacion', 'tipo de operación', 'type', 'operacion', 'operación', 'action', 'side'] and 'type' not in col_map:
+                        col_map['type'] = col_i
+                    elif norm_val in ['moneda', 'asset', 'cripto', 'ticker', 'coin', 'symbol', 'currency'] and 'asset' not in col_map:
+                        col_map['asset'] = col_i
+                    elif norm_val in ['monto compra (cripto)', 'monto compra', 'cantidad compra', 'monto_compra_cripto', 'buy_amount', 'compra'] and 'buy' not in col_map:
+                        col_map['buy'] = col_i
+                    elif norm_val in ['monto venta (cripto)', 'monto venta', 'cantidad venta', 'monto_venta_cripto', 'sell_amount', 'venta'] and 'sell' not in col_map:
+                        col_map['sell'] = col_i
+                    elif norm_val in ['cantidad', 'monto', 'amount', 'quantity', 'volume'] and 'amount' not in col_map:
+                        col_map['amount'] = col_i
+                    elif norm_val in ['monto ars', 'monto_ars', 'total ars', 'monto usd', 'total', 'total fiat', 'monto fiat', 'fiat', 'ars'] and 'fiat' not in col_map:
+                        col_map['fiat'] = col_i
+                    elif norm_val in ['cotización compra', 'cotizacion compra', 'cotización_compra', 'cotizacion_compra', 'precio compra'] and 'cot_buy' not in col_map:
+                        col_map['cot_buy'] = col_i
+                    elif norm_val in ['cotización venta', 'cotizacion venta', 'cotización_venta', 'cotizacion_venta', 'precio venta'] and 'cot_sell' not in col_map:
+                        col_map['cot_sell'] = col_i
+                    elif norm_val in ['precio', 'price', 'cotizacion', 'cotización', 'rate'] and 'price' not in col_map:
+                        col_map['price'] = col_i
+                    elif norm_val in ['comentarios', 'comentario', 'notes', 'memo', 'detalle', 'observaciones', 'referencia'] and 'notes' not in col_map:
+                        col_map['notes'] = col_i
+                continue
+
+            if not col_map:
+                continue
+
+            if len([c for c in row_strs if c]) == 1 and row_strs[0].upper() in ['COMPRAS', 'VENTAS', 'DEPOSITOS', 'RETIROS', 'TRANSACCIONES']:
+                continue
+
+            date_idx = col_map.get('date')
+            if date_idx is None or date_idx >= len(row):
+                continue
+
+            raw_date = row[date_idx]
+            if raw_date is None or str(raw_date).strip() == '' or str(raw_date).strip().lower() in ['fecha', 'date', 'nan', 'none']:
+                continue
+
+            if any('total' in str(c).lower() for c in row_strs if c):
+                continue
+
+            dt = parse_date(raw_date, current_exchange)
+
+            ex_idx = col_map.get('exchange')
+            raw_ex_val = str(row[ex_idx]).strip() if ex_idx is not None and ex_idx < len(row) and row[ex_idx] is not None else ''
+            if raw_ex_val and raw_ex_val.lower() not in ('', 'nan', 'none', 'null'):
+                row_ex = raw_ex_val
+            else:
+                row_ex = current_exchange if current_exchange and current_exchange.lower() not in ('', 'nan', 'none', 'null') else 'Otros'
+
+            type_idx = col_map.get('type')
+            raw_tipo_val = str(row[type_idx]).strip() if type_idx is not None and type_idx < len(row) and row[type_idx] is not None and str(row[type_idx]).strip() not in ['', 'nan', 'None'] else 'COMPRA'
+            if 'COMPRA' in raw_tipo_val.upper() or 'BUY' in raw_tipo_val.upper():
+                tipo_op = 'Compra'
+            elif 'VENTA' in raw_tipo_val.upper() or 'SELL' in raw_tipo_val.upper():
+                tipo_op = 'Venta'
+            else:
+                tipo_op = raw_tipo_val.title() if (raw_tipo_val.isupper() or raw_tipo_val.islower()) else raw_tipo_val
+
+            asset_idx = col_map.get('asset')
+            raw_moneda = str(row[asset_idx]).strip().upper() if asset_idx is not None and asset_idx < len(row) and row[asset_idx] is not None and str(row[asset_idx]).strip() not in ['', 'nan', 'None'] else 'USDT'
+
+            buy_idx = col_map.get('buy')
+            sell_idx = col_map.get('sell')
+            amount_idx = col_map.get('amount')
+
+            m_compra = clean_decimal(row[buy_idx]) if buy_idx is not None and buy_idx < len(row) else 0.0
+            m_venta = clean_decimal(row[sell_idx]) if sell_idx is not None and sell_idx < len(row) else 0.0
+
+            if m_compra == 0.0 and m_venta == 0.0 and amount_idx is not None and amount_idx < len(row):
+                amt = clean_decimal(row[amount_idx])
+                if any(kw in raw_tipo_val.upper() for kw in ['VENTA', 'RETIRO', 'SELL', 'OUT']):
+                    m_venta = amt
+                else:
+                    m_compra = amt
+
+            cot_buy_idx = col_map.get('cot_buy')
+            cot_sell_idx = col_map.get('cot_sell')
+            price_idx = col_map.get('price')
+
+            c_compra = clean_decimal(row[cot_buy_idx]) if cot_buy_idx is not None and cot_buy_idx < len(row) else (clean_decimal(row[price_idx]) if price_idx is not None and price_idx < len(row) and m_compra > 0 else 0.0)
+            c_venta = clean_decimal(row[cot_sell_idx]) if cot_sell_idx is not None and cot_sell_idx < len(row) else (clean_decimal(row[price_idx]) if price_idx is not None and price_idx < len(row) and m_venta > 0 else 0.0)
+
+            fiat_idx = col_map.get('fiat')
+            m_ars = clean_decimal(row[fiat_idx]) if fiat_idx is not None and fiat_idx < len(row) else 0.0
+
+            if m_ars == 0.0:
+                if m_compra > 0 and c_compra > 0:
+                    m_ars = m_compra * c_compra
+                elif m_venta > 0 and c_venta > 0:
+                    m_ars = m_venta * c_venta
+
+            notes_idx = col_map.get('notes')
+            raw_notes = str(row[notes_idx]).strip() if notes_idx is not None and notes_idx < len(row) and row[notes_idx] is not None and str(row[notes_idx]).strip() not in ['', 'nan', 'None'] else ''
+
+            tx_dict = create_transaction(
+                dt, row_ex, tipo_op, raw_moneda,
+                m_compra, m_venta, c_compra, c_venta, m_ars,
+                comentario=raw_notes
+            )
+
+            records.append(tx_dict)
+        except Exception as row_err:
+            print(f"Error procesando fila {idx} en multi exchange excel: {row_err}")
+            continue
+
+    sample = records[:5]
+    return records, sample
+

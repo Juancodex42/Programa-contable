@@ -565,12 +565,25 @@ async def fetch_bitget_p2p_v2():
         if not fn:
             return {"success": True, "error": None, "data": [], "anomalies": []}
             
-        res = await fn({'limit': '100'})
-        data_obj = res.get('data', {}) if isinstance(res, dict) else {}
-        orders = data_obj.get('orderList', []) if isinstance(data_obj, dict) else []
-        
-        for o in orders:
-            if o.get('status') != 'completed':
+        all_orders = []
+        for page in range(1, 15):
+            try:
+                res = await fn({'limit': '100', 'pageNo': str(page)})
+                data_obj = res.get('data', {}) if isinstance(res, dict) else {}
+                orders = data_obj.get('orderList', []) if isinstance(data_obj, dict) else []
+                if not orders:
+                    break
+                all_orders.extend(orders)
+                if len(orders) < 100:
+                    break
+            except Exception as pe:
+                print(f"Notice: Bitget P2P page {page} error: {pe}")
+                break
+
+        for o in all_orders:
+            # Check completed or fulfilled status
+            status_clean = str(o.get('status', '')).lower()
+            if status_clean and status_clean not in ['completed', 'finish', 'fulfilled', 'success']:
                 continue
             try:
                 is_buy = o.get('side', '').lower() == 'buy'

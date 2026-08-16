@@ -1,12 +1,19 @@
 import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
+import os
+import db_manager
 
 class ReconciliationEngine:
-    def __init__(self, db_path="transactions.db"):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        if db_path is None:
+            self.db_path = db_manager.DB_PATH
+        else:
+            self.db_path = db_path
         
     def _get_connection(self):
+        if self.db_path == db_manager.DB_PATH:
+            return db_manager.get_connection()
         return sqlite3.connect(self.db_path)
         
     def run_full_audit(self):
@@ -17,8 +24,36 @@ class ReconciliationEngine:
         """
         try:
             conn = self._get_connection()
-            query = "SELECT fecha, exchange, tipo_operacion, moneda, monto_compra_cripto, monto_venta_cripto, comentarios FROM transactions ORDER BY fecha ASC"
+            query = """
+                SELECT fecha, exchange, tipo_operacion, moneda, monto_compra_cripto, monto_venta_cripto, comentarios, is_certified 
+                FROM transactions 
+                ORDER BY fecha ASC, 
+                         CASE 
+                            WHEN LOWER(tipo_operacion) LIKE '%compra%' OR LOWER(tipo_operacion) LIKE '%ingreso%' OR LOWER(tipo_operacion) LIKE '%deposito%' THEN 1 
+                            ELSE 2 
+                         END ASC
+            """
             df = pd.read_sql_query(query, conn)
+            
+            # Fetch active certification ranges (start_date, end_date) directly from current DB
+            certified_ranges = []
+            try:
+                c_cursor = conn.cursor()
+                c_cursor.execute("SELECT start_date, end_date FROM certifications")
+                cert_rows = c_cursor.fetchall()
+                for s_date, e_date in cert_rows:
+                    if not s_date or not e_date:
+                        continue
+                    s_str = str(s_date).replace('T', ' ').strip()
+                    e_str = str(e_date).replace('T', ' ').strip()
+                    if len(s_str) == 10:
+                        s_str += " 00:00:00"
+                    if len(e_str) == 10:
+                        e_str += " 23:59:59"
+                    certified_ranges.append((s_str, e_str))
+            except Exception:
+                certified_ranges = []
+                
             conn.close()
         except Exception as e:
             return {"success": False, "error": str(e), "anomalies": []}
@@ -53,17 +88,34 @@ class ReconciliationEngine:
                 # Check for Phantom Sale
                 if ledgers[crypto] - amount < -epsilon:
                     missing_amount = abs(ledgers[crypto] - amount)
-                    anomalies.append({
-                        "crypto": crypto,
-                        "date": row['fecha'],
-                        "exchange": row['exchange'],
-                        "type": row['tipo_operacion'],
-                        "attempted_amount": amount,
-                        "current_ledger": ledgers[crypto],
-                        "missing": missing_amount,
-                        "source_ref": row['comentarios'],
-                        "message": f"Phantom Sale Detected: Venta de {amount} {crypto} pero el saldo histórico registrado era {ledgers[crypto]} (Falta registrar {missing_amount} {crypto} previos)."
-                    })
+                    
+                    # Check if this anomaly occurred within a certified date range or is explicitly certified
+                    is_certified_period = False
+                    tx_fecha_str = str(row['fecha']).replace('T', ' ').strip()
+                    if len(tx_fecha_str) == 10:
+                        tx_fecha_str += " 00:00:00"
+
+                    for s_str, e_str in certified_ranges:
+                        if s_str <= tx_fecha_str <= e_str:
+                            is_certified_period = True
+                            break
+
+                    if not is_certified_period and row.get('is_certified') in (1, '1', True):
+                        is_certified_period = True
+
+                    if not is_certified_period:
+                        anomalies.append({
+                            "crypto": crypto,
+                            "currency": crypto,
+                            "date": row['fecha'],
+                            "exchange": row['exchange'],
+                            "type": row['tipo_operacion'],
+                            "attempted_amount": amount,
+                            "current_ledger": ledgers[crypto],
+                            "missing": missing_amount,
+                            "source_ref": row['comentarios'],
+                            "message": f"Phantom Sale Detected: Venta de {amount} {crypto} pero el saldo histórico registrado era {ledgers[crypto]} (Falta registrar {missing_amount} {crypto} previos)."
+                        })
                 
                 ledgers[crypto] -= amount
                 
@@ -84,7 +136,7 @@ class ReconciliationEngine:
             
         anomalies = audit.get("anomalies", [])
         if not anomalies:
-            return {"success": True, "message": "No anomalies found. Ledger is perfectly balanced.", "fixed_count": 0}
+            return {"success": True, "message": "No anomalies found. Ledger is perfectly balanced.", "fixed_count": 0, "inserted_corrections": 0}
             
         import hashlib
         from models_v2 import TransactionModel
@@ -134,6 +186,7 @@ class ReconciliationEngine:
             "success": True,
             "message": f"Se aplicaron {inserted_total} ajustes automáticos.",
             "fixed_count": inserted_total,
+            "inserted_corrections": inserted_total,
             "remaining_anomalies": len(verification.get("anomalies", []))
         }
 

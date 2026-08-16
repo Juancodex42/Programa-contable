@@ -31,6 +31,7 @@ function Dashboard() {
     const [endDate, setEndDate] = useState('');
     const [selectedExchanges, setSelectedExchanges] = useState([]);
     const [equityInterval, setEquityInterval] = useState('daily');
+    const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'certified', 'uncertified'
 
     // UI Loading States
     const [loading, setLoading] = useState(true);
@@ -55,7 +56,8 @@ function Dashboard() {
             const params = {
                 start: startDate,
                 end: endDate,
-                exchanges: exchParam
+                exchanges: exchParam,
+                status: statusFilter !== 'all' ? statusFilter : undefined
             };
 
             const [kh, dh, eh, eq, sp, ah, gp] = await Promise.all([
@@ -84,7 +86,7 @@ function Dashboard() {
 
     useEffect(() => {
         fetchData();
-    }, [startDate, endDate, selectedExchanges, equityInterval]);
+    }, [startDate, endDate, selectedExchanges, equityInterval, statusFilter]);
 
     const handleToggleExchange = (exch) => {
         if (selectedExchanges.includes(exch)) {
@@ -168,6 +170,110 @@ function Dashboard() {
                             Ir a Inicio para cargar archivos de compras →
                         </Link>
                     </span>
+                </div>
+            )}
+
+            {/* LEGAL COVERAGE & CERTIFICATION BACKING BANNER */}
+            {kpis && (
+                <div style={{
+                    background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.95))',
+                    border: '1px solid rgba(56, 189, 248, 0.3)',
+                    borderRadius: '0.85rem',
+                    padding: '1rem 1.4rem',
+                    marginBottom: '1.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '1rem',
+                    boxShadow: '0 4px 15px rgba(0,0,0,0.2)'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <div style={{
+                            width: '46px',
+                            height: '46px',
+                            borderRadius: '10px',
+                            background: 'rgba(56, 189, 248, 0.15)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px solid rgba(56, 189, 248, 0.3)'
+                        }}>
+                            <CheckSquare size={26} color="#38bdf8" />
+                        </div>
+                        <div>
+                            <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                Respaldo Contable Legal (Certificaciones C.P.N.)
+                                <span style={{
+                                    fontSize: '0.75rem',
+                                    padding: '0.2rem 0.5rem',
+                                    borderRadius: '12px',
+                                    background: kpis.certified_pct > 50 ? 'rgba(52, 211, 153, 0.2)' : 'rgba(251, 191, 36, 0.2)',
+                                    color: kpis.certified_pct > 50 ? '#34d399' : '#fbbf24',
+                                    border: `1px solid ${kpis.certified_pct > 50 ? '#34d399' : '#fbbf24'}`,
+                                    fontWeight: 700
+                                }}>
+                                    {kpis.certified_pct}% Auditado
+                                </span>
+                            </div>
+                            <div style={{ fontSize: '0.88rem', color: '#94a3b8', marginTop: '0.2rem' }}>
+                                {kpis.certified_count > 0 ? (
+                                    <>Volumen Auditado: <strong style={{ color: '#38bdf8' }}>${(kpis.certified_volume_ars || 0).toLocaleString()} ARS</strong> ({kpis.certified_count} txs) • Provisorio al Día: <strong style={{ color: '#fbbf24' }}>${(kpis.provisional_volume_ars || 0).toLocaleString()} ARS</strong> ({kpis.provisional_count} txs)</>
+                                ) : (
+                                    <>Aún no hay transacciones auditadas por certificación en este filtro. Regístrala en Calendario.</>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 600 }}>Capa:</span>
+                        <button
+                            onClick={() => setStatusFilter('all')}
+                            style={{
+                                padding: '0.4rem 0.8rem',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                fontWeight: 700,
+                                border: statusFilter === 'all' ? '1px solid #38bdf8' : '1px solid #334155',
+                                background: statusFilter === 'all' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(30, 41, 59, 0.6)',
+                                color: statusFilter === 'all' ? '#e0f2fe' : '#94a3b8',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Consolidado (Todos)
+                        </button>
+                        <button
+                            onClick={() => setStatusFilter('certified')}
+                            style={{
+                                padding: '0.4rem 0.8rem',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                fontWeight: 700,
+                                border: statusFilter === 'certified' ? '1px solid #34d399' : '1px solid #334155',
+                                background: statusFilter === 'certified' ? 'rgba(52, 211, 153, 0.25)' : 'rgba(30, 41, 59, 0.6)',
+                                color: statusFilter === 'certified' ? '#a7f3d0' : '#94a3b8',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Verdad Legal (Certificado)
+                        </button>
+                        <button
+                            onClick={() => setStatusFilter('uncertified')}
+                            style={{
+                                padding: '0.4rem 0.8rem',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                fontWeight: 700,
+                                border: statusFilter === 'uncertified' ? '1px solid #fbbf24' : '1px solid #334155',
+                                background: statusFilter === 'uncertified' ? 'rgba(251, 191, 36, 0.25)' : 'rgba(30, 41, 59, 0.6)',
+                                color: statusFilter === 'uncertified' ? '#fef3c7' : '#94a3b8',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Provisorio (Al Día)
+                        </button>
+                    </div>
                 </div>
             )}
 

@@ -20,7 +20,7 @@ def recalculate_fifo_costs_db():
             FROM transactions 
             ORDER BY fecha ASC, 
                      CASE 
-                        WHEN tipo_operacion LIKE '%compra%' THEN 1 
+                        WHEN LOWER(tipo_operacion) LIKE '%compra%' OR LOWER(tipo_operacion) LIKE '%ingreso%' OR LOWER(tipo_operacion) LIKE '%deposito%' THEN 1 
                         ELSE 2 
                      END ASC,
                      tx_hash ASC
@@ -107,17 +107,8 @@ def recalculate_fifo_costs_db():
                     if remaining_to_match > 0:
                         if cot_compra > 0:
                             total_cost_ars += remaining_to_match * cot_compra
-                        else:
-                            try:
-                                year_str = str(row['fecha'])[:4]
-                                year = int(year_str) if year_str.isdigit() else 2025
-                            except Exception:
-                                year = 2025
-                            year_settings = settings_by_year.get(year, {})
-                            fallback_margin = float(year_settings.get('ganancias_estimadas_fallback_pct', 15.0)) / 100.0
-                            unit_sell_price = cot_venta if cot_venta > 0 else (m_ars / m_venta if m_venta > 0 else 0.0)
-                            estimated_unit_cost = max(0.0, unit_sell_price * (1.0 - fallback_margin))
-                            total_cost_ars += remaining_to_match * estimated_unit_cost
+                        # Note: If no purchase history or cot_compra exists, cost is 0.0.
+                        # The history gap scanner (check_history_gaps) alerts the user to the missing buy.
                         
                     # Calculate effective buy price in ARS per unit
                     effective_buy_price = total_cost_ars / m_venta if m_venta > 0 else 0.0
@@ -127,17 +118,17 @@ def recalculate_fifo_costs_db():
                     
                     updates.append((effective_buy_price, tx_hash))
                     
-        # 2. Write updates to DB
+        # 2. Write updates to DB (excluding certified transactions)
         if updates:
             c = conn.cursor()
-            # Perform bulk update
+            # Perform bulk update safely excluding is_certified = 1 rows
             c.executemany("""
                 UPDATE transactions 
                 SET cotizacion_compra = ? 
-                WHERE tx_hash = ?
+                WHERE tx_hash = ? AND (is_certified IS NULL OR is_certified = 0)
             """, updates)
             conn.commit()
-            return {"success": True, "message": f"Successfully updated {len(updates)} Venta transactions with FIFO cost.", "updated_count": len(updates)}
+            return {"success": True, "message": f"Successfully updated Venta transactions with FIFO cost.", "updated_count": len(updates)}
         else:
             return {"success": True, "message": "No Venta transactions to update.", "updated_count": 0}
             

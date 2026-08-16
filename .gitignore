@@ -1,4 +1,12 @@
 *.db
 *.log
 __pycache__/
+.pytest_cache/
 webapp/backend/uploads/
+system.lock
+git_diff_*.txt
+test_stress_res.txt
+*.xlsx
+.agents/
+node_modules/
+dist/

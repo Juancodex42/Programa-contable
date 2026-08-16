@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Download, Calendar, CheckCircle, Clock, Layers, FileSpreadsheet, RefreshCw, CheckSquare, Square, Info, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Download, Calendar, CheckCircle, Clock, Layers, FileSpreadsheet, RefreshCw, CheckSquare, Square, Info, AlertTriangle, ShieldCheck, Sparkles } from 'lucide-react';
 import axios from 'axios';
 import config from '../config';
 
 function Reports() {
+    const navigate = useNavigate();
     const [selectedExchanges, setSelectedExchanges] = useState([]);
     const [dateRange, setDateRange] = useState({ start: '', end: '' });
     const [latestCertDate, setLatestCertDate] = useState(null);
@@ -75,6 +77,11 @@ function Reports() {
     useEffect(() => {
         fetchExchanges();
         fetchLatestCertDate();
+
+        // Auto-refresh certification date when Calendar.jsx saves or deletes a certification
+        const onCertUpdated = () => fetchLatestCertDate();
+        window.addEventListener('certifications_updated', onCertUpdated);
+        return () => window.removeEventListener('certifications_updated', onCertUpdated);
     }, []);
 
     const datesInverted = dateRange.start && dateRange.end && dateRange.start > dateRange.end;
@@ -255,7 +262,7 @@ function Reports() {
                 const hasErr = processRes.data.results.some(r => r.error);
                 if (hasErr || totalCount === 0) {
                     const errDetail = processRes.data.results.find(r => r.error)?.error;
-                    alert(errDetail || "No se detectaron transacciones válidas en la planilla cargada. Asegúrate de subir el archivo descargado de Binance (Spot o P2P en CSV o Excel).");
+                    alert(errDetail || "No se detectaron transacciones válidas en la planilla cargada. Asegúrate de subir el extracto original del exchange o una Planilla Consolidada (Excel Maestro).");
                 }
             }
             
@@ -459,7 +466,16 @@ function Reports() {
                         <div>
                             <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: '600' }}>Fecha de Inicio</label>
                             <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-color)', borderRadius: '0.5rem', padding: '0.75rem' }}>
-                                <Calendar size={18} color="var(--text-secondary)" style={{ marginRight: '0.75rem' }} />
+                                <Calendar 
+                                    size={18} 
+                                    color="#38bdf8" 
+                                    style={{ marginRight: '0.75rem', cursor: 'pointer' }} 
+                                    title="Abrir calendario visual"
+                                    onClick={(e) => {
+                                        const inp = e.currentTarget.parentElement.querySelector('input[type="date"]');
+                                        if (inp && typeof inp.showPicker === 'function') { try { inp.showPicker(); } catch(err){} }
+                                    }}
+                                />
                                 <input 
                                     type="date" 
                                     style={{ background: 'transparent', border: 'none', color: 'white', flex: 1, outline: 'none', fontSize: '0.95rem' }} 
@@ -478,7 +494,16 @@ function Reports() {
                         <div>
                             <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: '600' }}>Fecha de Fin</label>
                             <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-color)', borderRadius: '0.5rem', padding: '0.75rem' }}>
-                                <Calendar size={18} color="var(--text-secondary)" style={{ marginRight: '0.75rem' }} />
+                                <Calendar 
+                                    size={18} 
+                                    color="#38bdf8" 
+                                    style={{ marginRight: '0.75rem', cursor: 'pointer' }} 
+                                    title="Abrir calendario visual"
+                                    onClick={(e) => {
+                                        const inp = e.currentTarget.parentElement.querySelector('input[type="date"]');
+                                        if (inp && typeof inp.showPicker === 'function') { try { inp.showPicker(); } catch(err){} }
+                                    }}
+                                />
                                 <input 
                                     type="date" 
                                     style={{ background: 'transparent', border: 'none', color: 'white', flex: 1, outline: 'none', fontSize: '0.95rem' }} 
@@ -648,20 +673,51 @@ function Reports() {
                         )}
 
                         {gaps && gaps.length > 0 && (
-                            <div style={{ background: 'rgba(245, 158, 11, 0.12)', border: '1px solid #f59e0b', borderRadius: '0.75rem', padding: '0.85rem 1rem', marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                <span style={{ fontSize: '0.85rem', color: '#fde68a', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                    <AlertTriangle size={15} color="#f59e0b" /> Faltantes de Historial (Huecos)
-                                </span>
-                                <span style={{ fontSize: '0.78rem', color: '#cbd5e1', lineHeight: '1.4' }}>
-                                    Se detectaron ventas de criptomonedas sin compras previas registradas. Esto indica que falta cargar el historial para cubrir las siguientes operaciones:
-                                    <ul style={{ margin: '0.2rem 0 0 0', paddingLeft: '1.1rem', maxHeight: '140px', overflowY: 'auto' }}>
-                                        {gaps.map((gap, idx) => (
-                                            <li key={idx}>
-                                                <strong>{gap.exchange}:</strong> Venta de {gap.sold_qty} {gap.coin} el {gap.date.split(' ')[0]} (Faltan comprar {gap.deficit.toFixed(4)} {gap.coin}).
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </span>
+                            <div style={{ 
+                                background: 'rgba(245, 158, 11, 0.08)', 
+                                border: '1px solid rgba(245, 158, 11, 0.3)', 
+                                borderRadius: '0.75rem', 
+                                padding: '0.85rem 1rem', 
+                                marginBottom: '1rem', 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'space-between',
+                                gap: '1rem',
+                                flexWrap: 'wrap'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+                                    <div style={{ background: 'rgba(245, 158, 11, 0.2)', padding: '0.45rem', borderRadius: '0.5rem', display: 'flex', alignItems: 'center' }}>
+                                        <AlertTriangle size={18} color="#fbbf24" />
+                                    </div>
+                                    <div>
+                                        <span style={{ fontSize: '0.86rem', color: '#fef08a', fontWeight: '700', display: 'block' }}>
+                                            {gaps.length} Faltante(s) de Historial (Huecos FIFO / P2P)
+                                        </span>
+                                        <span style={{ fontSize: '0.78rem', color: '#cbd5e1', lineHeight: '1.3' }}>
+                                            Se detectaron ventas sin compras previas registradas. Podes completar la información en el Calendario.
+                                        </span>
+                                    </div>
+                                </div>
+                                <button 
+                                    className="btn-primary" 
+                                    style={{ 
+                                        background: 'linear-gradient(135deg, #f59e0b, #d97706)', 
+                                        border: 'none', 
+                                        padding: '0.45rem 0.9rem', 
+                                        fontSize: '0.8rem', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: '0.4rem', 
+                                        color: '#fff', 
+                                        fontWeight: '600', 
+                                        borderRadius: '0.5rem',
+                                        cursor: 'pointer' 
+                                    }}
+                                    onClick={() => navigate('/calendar?tab=warnings')}
+                                >
+                                    <Sparkles size={14} />
+                                    Resolver en Calendario →
+                                </button>
                             </div>
                         )}
 
