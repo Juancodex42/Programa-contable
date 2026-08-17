@@ -172,7 +172,7 @@ function History() {
         return (
             <div style={{ padding: '3rem', maxWidth: '1400px', margin: '0 auto', textAlign: 'center', color: 'var(--text-secondary)' }}>
                 <RefreshCw size={36} className="spin" style={{ color: 'var(--brand-indigo-light)', marginBottom: '1rem' }} />
-                <h3 style={{ color: 'var(--text-primary)', fontSize: '1.2rem', margin: 0 }}>Cargando sub-ledger de transacciones...</h3>
+                <h3 style={{ color: 'var(--text-primary)', fontSize: '1.2rem', margin: 0 }}>Cargando historial de transacciones...</h3>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>Recuperando registros auditados y estado de consistencia FIFO.</p>
             </div>
         );
@@ -202,7 +202,7 @@ function History() {
                         </h1>
                     </div>
                     <p style={{ color: 'var(--text-secondary)', margin: '0.35rem 0 0 0', fontSize: '0.88rem', paddingLeft: '2.85rem' }}>
-                        Sub-ledger contable: transacciones auditadas por Certificación C.P.N. vs operaciones provisorias en vivo.
+                        Historial contable: transacciones auditadas por Certificación C.P.N. vs operaciones provisorias en vivo.
                     </p>
                 </div>
 
@@ -607,7 +607,7 @@ function History() {
                             Mostrando <strong>{filteredTxs.length}</strong> de <strong>{allCount}</strong> operaciones
                         </span>
                         <span>
-                            Sub-Ledger sincronizado con SQLite local
+                            Historial sincronizado con SQLite local
                         </span>
                     </div>
                 </div>

@@ -159,9 +159,6 @@ function Home() {
                         <h1 style={{ fontSize: '1.6rem', margin: 0, color: 'var(--text-primary)', fontWeight: '700', letterSpacing: '-0.02em' }}>
                             CryptoTax <span style={{ color: 'var(--brand-indigo-light)', fontWeight: '500' }}>Pro</span>
                         </h1>
-                        <span className="badge badge-indigo">
-                            Sub-Ledger Impositivo
-                        </span>
                     </div>
                     <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0', fontSize: 'var(--text-xs)', letterSpacing: '0.2px' }}>
                         Motor de Conciliación y Liquidación Fiscal Multiexchange
@@ -174,7 +171,7 @@ function Home() {
                             Régimen Impositivo
                         </div>
                         <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)', fontWeight: '600' }}>
-                            FIFO Sub-Ledger AFIP / Ganancias
+                            Método FIFO / Ganancias & IIBB
                         </div>
                     </div>
                 </div>
@@ -348,7 +345,7 @@ function Home() {
                                             borderLeft: '2px solid var(--brand-indigo)'
                                         }}
                                     >
-                                        <UploadCloud size={15} color="var(--brand-indigo-light)" /> Importar al Sub-Ledger
+                                        <UploadCloud size={15} color="var(--brand-indigo-light)" /> Importar Operaciones
                                     </button>
                                     <button
                                         type="button"
@@ -516,7 +513,7 @@ function Home() {
                                             </>
                                         ) : (
                                             <>
-                                                <CheckCircle2 size={18} /> Procesar e Importar al Sub-Ledger
+                                                <CheckCircle2 size={18} /> Procesar e Importar Operaciones
                                             </>
                                         )}
                                     </button>
@@ -720,7 +717,7 @@ function Home() {
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', flexWrap: 'wrap', gap: '0.4rem' }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                                                     <h5 style={{ color: 'var(--brand-indigo-light)', fontSize: 'var(--text-xs)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: '700' }}>
-                                                        Normalizado (Sub-Ledger)
+                                                        Normalizado (Base Contable)
                                                     </h5>
                                                 </div>
 

@@ -247,13 +247,9 @@ function Dashboard() {
             <header style={{ marginBottom: '1.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.25rem' }}>
                 <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
-                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#4F46E5', boxShadow: '0 0 10px rgba(79, 70, 229, 0.7)' }} />
                         <h1 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#F8FAFC' }}>
                             Panel Analítico de Métricas
                         </h1>
-                        <span className="badge badge-indigo" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            Sub-Ledger en Vivo
-                        </span>
                     </div>
                     <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.9rem' }}>
                         Trazabilidad de fondos, curvas de rendimiento neto y conciliación contable multi-exchange.

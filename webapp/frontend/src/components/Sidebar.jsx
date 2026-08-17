@@ -79,23 +79,11 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                         {/* Branding Header */}
                         <div style={{ marginBottom: '1.75rem', paddingBottom: '1.25rem', borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <div style={{
-                                        width: '8px',
-                                        height: '8px',
-                                        borderRadius: '50%',
-                                        backgroundColor: '#4F46E5',
-                                        boxShadow: '0 0 8px rgba(79, 70, 229, 0.6)'
-                                    }} />
-                                    <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#F8FAFC', margin: 0, letterSpacing: '-0.02em' }}>
-                                        CryptoTax <span style={{ color: '#818CF8', fontWeight: '500' }}>Pro</span>
-                                    </h2>
-                                </div>
-                                <span className="badge badge-indigo" style={{ fontSize: '10px', padding: '0.15rem 0.45rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                    v2.0 Sub-Ledger
-                                </span>
+                                <h2 style={{ fontSize: '1.3rem', fontWeight: '800', color: '#F8FAFC', margin: 0, letterSpacing: '-0.02em' }}>
+                                    CryptoTax <span style={{ color: '#818CF8', fontWeight: '500' }}>Pro</span>
+                                </h2>
                             </div>
-                            <p style={{ fontSize: '12px', color: '#94A3B8', margin: 0, paddingLeft: '1rem' }}>
+                            <p style={{ fontSize: '12px', color: '#94A3B8', margin: 0 }}>
                                 Motor Impositivo & Contabilidad
                             </p>
                         </div>
@@ -143,7 +131,6 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                                     Algoritmo FIFO estricto
                                 </div>
                             </div>
-                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
                         </div>
                     </motion.aside>
                 )}
