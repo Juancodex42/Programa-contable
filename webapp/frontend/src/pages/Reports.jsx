@@ -366,10 +366,10 @@ function Reports() {
         <div style={{ padding: '1.25rem 2rem', maxWidth: '1400px', margin: '1rem auto', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 2rem)', boxSizing: 'border-box', overflow: 'hidden' }}>
             <header style={{ marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                    <h1 style={{ fontSize: '2rem', margin: 0, background: 'linear-gradient(to right, #38bdf8, #c084fc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: '800' }}>
+                    <h1 style={{ fontSize: '1.85rem', margin: 0, color: '#F8FAFC', fontWeight: '700', letterSpacing: '-0.02em' }}>
                         Reportes Continuos
                     </h1>
-                    <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0', fontSize: '0.95rem' }}>
+                    <p style={{ color: '#94A3B8', margin: '0.25rem 0 0 0', fontSize: '0.9rem' }}>
                         Genera y descarga reportes personalizados a partir del historial acumulado en la base de datos.
                     </p>
                 </div>
@@ -701,7 +701,7 @@ function Reports() {
                                 <button 
                                     className="btn-primary" 
                                     style={{ 
-                                        background: 'linear-gradient(135deg, #f59e0b, #d97706)', 
+                                        background: '#D97706', 
                                         border: 'none', 
                                         padding: '0.45rem 0.9rem', 
                                         fontSize: '0.8rem', 
@@ -1163,15 +1163,13 @@ function Reports() {
                                     <button
                                         onClick={confirmAndDownload}
                                         disabled={downloading}
+                                        className="btn-primary"
                                         style={{
-                                            background: 'linear-gradient(135deg, var(--accent-purple), var(--accent-cyan))',
-                                            color: 'white',
-                                            border: 'none',
                                             padding: '0.6rem 1.4rem',
                                             borderRadius: '0.5rem',
                                             fontSize: '0.85rem',
                                             cursor: downloading ? 'not-allowed' : 'pointer',
-                                            fontWeight: 'bold',
+                                            fontWeight: '600',
                                             opacity: downloading ? 0.5 : 1
                                         }}
                                     >

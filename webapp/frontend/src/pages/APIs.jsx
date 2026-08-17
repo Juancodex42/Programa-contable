@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plug, Key, Save, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
+import { Plug, Save, RefreshCw, CheckCircle, AlertCircle, Shield, Check, Info } from 'lucide-react';
 import axios from 'axios';
 import config from '../config';
 
@@ -8,7 +8,7 @@ function APIs() {
     const [apiStatuses, setApiStatuses] = useState({});
     const [bgSyncEnabled, setBgSyncEnabled] = useState(false);
     const [editingEx, setEditingEx] = useState(null);
-    const [formData, setFormData] = useState({ key: '', secret: '' });
+    const [formData, setFormData] = useState({ key: '', secret: '', password: '' });
     const [syncing, setSyncing] = useState(false);
     const [statusLoading, setStatusLoading] = useState(true);
     const [syncResults, setSyncResults] = useState(null);
@@ -35,7 +35,6 @@ function APIs() {
         }
         setServerError(null);
         try {
-            // Fast requests first (skip slow /api/status)
             const [envRes, schRes, exRes] = await Promise.all([
                 axios.get(`${config.API_URL}/api/env`),
                 axios.get(`${config.API_URL}/api/scheduler/status`).catch(() => ({ data: { enabled: false } })),
@@ -58,7 +57,6 @@ function APIs() {
                 setDynamicExchanges(defaultApiExchanges);
             }
 
-            // Load API status in background (slow endpoint)
             const statusUrl = forceStatusRefresh 
                 ? `${config.API_URL}/api/status?force=true` 
                 : `${config.API_URL}/api/status`;
@@ -82,7 +80,7 @@ function APIs() {
             await axios.post(`${config.API_URL}/api/scheduler/toggle`, { enabled: nextState });
         } catch (e) {
             console.error("Error toggling background scheduler", e);
-            setBgSyncEnabled(!nextState); // Rollback
+            setBgSyncEnabled(!nextState);
         }
     };
 
@@ -111,7 +109,6 @@ function APIs() {
             const res = await axios.post(`${config.API_URL}/api/sync`);
             setSyncResults(res.data);
 
-            // Automatically download if there's data
             if (res.data.total_inserted > 0) {
                 const dlPayload = { filenames: res.data.details.filter(d => d.count > 0).map(d => `api_sync_${d.exchange.toLowerCase().replace(' ', '')}`) };
                 const dlRes = await axios.post(`${config.API_URL}/download`, dlPayload, { responseType: 'blob' });
@@ -130,78 +127,155 @@ function APIs() {
     };
 
     return (
-        <div style={{ padding: '2rem', maxWidth: '900px', margin: '0 auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+        <div style={{ padding: '2rem', maxWidth: '1050px', margin: '0 auto' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
                 <div>
-                    <h2 style={{ color: 'var(--accent-purple)', fontSize: '2rem', marginBottom: '0.5rem' }}>Conexiones API</h2>
-                    <p style={{ color: 'var(--text-secondary)' }}>Conecta tus exchanges para reportes 100% automáticos.</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.35rem' }}>
+                        <h2 style={{ color: '#F8FAFC', fontSize: '1.75rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
+                            Conexiones API
+                        </h2>
+                        <span className="badge-indigo" style={{ padding: '0.2rem 0.6rem', fontSize: '11px', fontWeight: 600 }}>
+                            Sync v2.0
+                        </span>
+                    </div>
+                    <p style={{ color: '#94A3B8', margin: 0, fontSize: '14px' }}>
+                        Sincronización automatizada de extractos y libros mayores directo desde los exchanges.
+                    </p>
                 </div>
                 <button
                     className="btn-primary"
                     onClick={handleSync}
                     disabled={syncing}
-                    style={{ background: 'linear-gradient(135deg, #4ade80 0%, #059669 100%)', display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '1rem', padding: '0.8rem 1.5rem' }}
+                    style={{
+                        display: 'flex',
+                        gap: '0.5rem',
+                        alignItems: 'center',
+                        fontSize: '14px',
+                        padding: '0.75rem 1.4rem'
+                    }}
                 >
-                    <RefreshCw size={20} className={syncing ? 'spin' : ''} />
-                    {syncing ? 'Sincronizando...' : 'AUTO-SINCRONIZAR'}
+                    <RefreshCw size={16} className={syncing ? 'spin' : ''} />
+                    {syncing ? 'Sincronizando Exchanges...' : 'AUTO-SINCRONIZAR AHORA'}
                 </button>
             </div>
 
+            {/* Server Error Alert */}
             {serverError && (
-                <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', color: '#f87171', padding: '1rem 1.5rem', borderRadius: '0.5rem', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{
+                    background: 'rgba(244, 63, 94, 0.1)',
+                    border: '1px solid rgba(244, 63, 94, 0.3)',
+                    color: '#FB7185',
+                    padding: '1rem 1.25rem',
+                    borderRadius: '8px',
+                    marginBottom: '1.5rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <AlertCircle size={20} color="#ef4444" />
-                        <span>{serverError}</span>
+                        <AlertCircle size={18} color="#F43F5E" />
+                        <span style={{ fontSize: '14px' }}>{serverError}</span>
                     </div>
-                    <button onClick={() => loadKeys(true)} className="btn-primary" style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }}>
+                    <button
+                        onClick={() => loadKeys(true)}
+                        className="btn-secondary"
+                        style={{ padding: '0.4rem 0.9rem', fontSize: '12px' }}
+                    >
                         Reintentar
                     </button>
                 </div>
             )}
 
-            <div className="glass-card" style={{ padding: '1.2rem 1.5rem', marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(30, 41, 59, 0.6)', border: '1px solid var(--border-color)', borderRadius: '0.75rem' }}>
+            {/* Background Scheduler Card */}
+            <div className="card-surface" style={{
+                padding: '1.25rem 1.5rem',
+                marginBottom: '2rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '1rem'
+            }}>
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                    <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: bgSyncEnabled ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <RefreshCw size={22} color={bgSyncEnabled ? '#4ade80' : 'var(--text-secondary)'} />
+                    <div style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '8px',
+                        background: bgSyncEnabled ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255,255,255,0.04)',
+                        border: bgSyncEnabled ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(255,255,255,0.06)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                    }}>
+                        <RefreshCw size={20} color={bgSyncEnabled ? '#10B981' : '#94A3B8'} />
                     </div>
                     <div>
-                        <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'white' }}>Sincronización Automática en Segundo Plano (Windows)</h3>
-                        <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                            {bgSyncEnabled ? '✓ Tarea activa en Windows: sincroniza APIs diariamente a las 20:00 hs sin abrir la app.' : 'Apagado: las APIs solo se sincronizarán cuando presiones AUTO-SINCRONIZAR.'}
+                        <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#F8FAFC' }}>
+                            Sincronización Automática en Segundo Plano (Windows Task)
+                        </h3>
+                        <p style={{ margin: '0.2rem 0 0 0', fontSize: '13px', color: '#94A3B8' }}>
+                            {bgSyncEnabled 
+                                ? '✓ Sincronización programada diaria activa (20:00 hs sin necesidad de abrir la aplicación).' 
+                                : 'Inactivo: las APIs se consultarán únicamente cuando pulses "AUTO-SINCRONIZAR AHORA".'}
                         </p>
                     </div>
                 </div>
                 <button
                     onClick={handleToggleBgSync}
                     style={{
-                        padding: '0.6rem 1.4rem',
-                        borderRadius: '2rem',
-                        border: 'none',
+                        padding: '0.5rem 1.25rem',
+                        borderRadius: '6px',
+                        border: '1px solid',
+                        borderColor: bgSyncEnabled ? 'rgba(16, 185, 129, 0.4)' : 'rgba(255, 255, 255, 0.1)',
                         cursor: 'pointer',
-                        fontWeight: '600',
-                        fontSize: '0.85rem',
-                        transition: 'all 0.3s ease',
-                        background: bgSyncEnabled ? 'linear-gradient(135deg, #4ade80 0%, #059669 100%)' : '#334155',
-                        color: 'white',
-                        boxShadow: bgSyncEnabled ? '0 0 15px rgba(74,222,128,0.3)' : 'none'
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        transition: 'all 0.2s ease',
+                        background: bgSyncEnabled ? 'rgba(16, 185, 129, 0.15)' : '#182238',
+                        color: bgSyncEnabled ? '#34D399' : '#94A3B8'
                     }}
                 >
-                    {bgSyncEnabled ? 'ENCENDIDO' : 'APAGADO'}
+                    {bgSyncEnabled ? '● TAREA PROGRAMADA ON' : '○ APAGADO'}
                 </button>
             </div>
 
-
+            {/* Sync Results Banner */}
             {syncResults && (
-                <div style={{ marginBottom: '2rem', background: 'rgba(74,222,128,0.1)', border: '1px solid #4ade80', borderRadius: '0.5rem', padding: '1.5rem' }}>
-                    <h3 style={{ color: '#4ade80', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-                        <CheckCircle size={20} /> Sincronización Completada
+                <div style={{
+                    marginBottom: '2rem',
+                    background: 'rgba(16, 185, 129, 0.08)',
+                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                    borderRadius: '10px',
+                    padding: '1.25rem 1.5rem'
+                }}>
+                    <h3 style={{
+                        color: '#34D399',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        margin: '0 0 1rem 0',
+                        fontSize: '15px',
+                        fontWeight: 600
+                    }}>
+                        <CheckCircle size={18} /> Sincronización de Extractos Completada
                     </h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
                         {syncResults.details.map((d, i) => (
-                            <div key={i} style={{ background: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '0.5rem' }}>
-                                <strong>{d.exchange}</strong>
-                                <div style={{ color: d.count > 0 ? '#4ade80' : 'var(--text-secondary)', marginTop: '0.5rem' }}>
-                                    {d.count > 0 ? `+${d.count} operaciones` : d.message}
+                            <div key={i} style={{
+                                background: '#121A2B',
+                                border: '1px solid rgba(255,255,255,0.06)',
+                                padding: '0.85rem 1rem',
+                                borderRadius: '8px'
+                            }}>
+                                <strong style={{ color: '#F8FAFC', fontSize: '13px' }}>{d.exchange}</strong>
+                                <div style={{
+                                    color: d.count > 0 ? '#34D399' : '#94A3B8',
+                                    marginTop: '0.35rem',
+                                    fontSize: '12px',
+                                    fontWeight: d.count > 0 ? 600 : 400
+                                }} className="tabular-nums">
+                                    {d.count > 0 ? `+${d.count} operaciones importadas` : d.message}
                                 </div>
                             </div>
                         ))}
@@ -209,121 +283,183 @@ function APIs() {
                 </div>
             )}
 
-            <div style={{ display: 'grid', gap: '1.5rem' }}>
+            {/* Exchanges Grid */}
+            <div style={{ display: 'grid', gap: '1rem' }}>
                 {dynamicExchanges.map(ex => {
                     const hasKey = !!envKeys[ex.keyName] && envKeys[ex.keyName] !== 'your_api_key_here';
                     const isEditing = editingEx === ex.id;
                     const st = apiStatuses[ex.statusKey] || {};
-                    const statusType = st.status; // 'online', 'expired', 'offline', 'unconfigured'
+                    const statusType = st.status;
 
                     let statusText = 'No configurado';
-                    let statusColor = 'var(--text-secondary)';
+                    let badgeClass = 'badge-slate';
                     let isErrorBorder = false;
 
                     if (statusLoading && hasKey) {
-                        statusText = '⏳ Verificando...';
-                        statusColor = '#a78bfa';
+                        statusText = 'Verificando firma...';
+                        badgeClass = 'badge-indigo';
                     } else if (statusType === 'online') {
-                        statusText = '✓ Autenticado OK';
-                        statusColor = '#4ade80';
+                        statusText = 'Autenticado OK';
+                        badgeClass = 'badge-emerald';
                     } else if (statusType === 'expired') {
-                        statusText = `⚠️ Llave Vencida / Inválida (${st.msg || ''})`;
-                        statusColor = '#f87171';
+                        statusText = `Llave Vencida (${st.msg || ''})`;
+                        badgeClass = 'badge-rose';
                         isErrorBorder = true;
                     } else if (statusType === 'offline') {
-                        statusText = `❌ Error (${st.msg || 'Conexión fallida'})`;
-                        statusColor = '#ef4444';
+                        statusText = `Error de Conexión (${st.msg || 'Fallo'})`;
+                        badgeClass = 'badge-rose';
                         isErrorBorder = true;
                     } else if (statusType === 'unconfigured' || !hasKey) {
                         statusText = 'No configurado';
-                        statusColor = 'var(--text-secondary)';
+                        badgeClass = 'badge-slate';
                     } else if (hasKey) {
                         statusText = st.msg || 'Configurado';
-                        statusColor = '#f59e0b';
+                        badgeClass = 'badge-amber';
                     }
 
                     return (
-                        <div key={ex.id} className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', border: isErrorBorder ? '1px solid #f87171' : '1px solid var(--border-color)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div
+                            key={ex.id}
+                            className="card-surface"
+                            style={{
+                                padding: '1.25rem 1.5rem',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '1rem',
+                                borderColor: isErrorBorder ? 'rgba(244, 63, 94, 0.35)' : undefined
+                            }}
+                        >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
                                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                                    <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: isErrorBorder ? 'rgba(248,113,113,0.15)' : (statusType === 'online' ? 'rgba(74,222,128,0.1)' : 'rgba(255,255,255,0.05)'), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        <Plug size={20} color={statusColor} />
+                                    <div style={{
+                                        width: '40px',
+                                        height: '40px',
+                                        borderRadius: '8px',
+                                        background: isErrorBorder ? 'rgba(244, 63, 94, 0.12)' : (statusType === 'online' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255,255,255,0.04)'),
+                                        border: '1px solid rgba(255,255,255,0.06)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}>
+                                        <Plug size={18} color={statusType === 'online' ? '#10B981' : isErrorBorder ? '#F43F5E' : '#94A3B8'} />
                                     </div>
                                     <div>
-                                        <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{ex.name}</h3>
-                                        <span style={{ fontSize: '0.85rem', fontWeight: '500', color: statusColor }}>
-                                            {statusText}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                                            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#F8FAFC' }}>{ex.name}</h3>
+                                            <span className={badgeClass} style={{ fontSize: '11px', padding: '0.15rem 0.55rem' }}>
+                                                {statusText}
+                                            </span>
+                                        </div>
+                                        <span style={{ fontSize: '12px', color: '#64748B', display: 'block', marginTop: '0.15rem' }}>
+                                            {hasKey ? 'Credenciales de lectura guardadas localmente' : 'Sin credenciales configuradas'}
                                         </span>
                                     </div>
                                 </div>
                                 <button
-                                    className="btn-primary"
-                                    style={{ background: isEditing ? 'var(--border-color)' : (hasKey ? 'rgba(255,255,255,0.05)' : '#334155'), color: 'white', backgroundImage: 'none' }}
+                                    className={isEditing ? "btn-secondary" : (hasKey ? "btn-outline" : "btn-primary")}
+                                    style={{ padding: '0.5rem 1.1rem', fontSize: '12px' }}
                                     onClick={() => {
                                         if (isEditing) setEditingEx(null);
                                         else {
                                             setEditingEx(ex.id);
-                                            setFormData({ key: '', secret: '' }); // Clear generic placeholder
+                                            setFormData({ key: '', secret: '', password: '' });
                                         }
                                     }}
                                 >
-                                    {isEditing ? 'CANCELAR' : (hasKey ? 'CONFIGURAR' : 'CONECTAR')}
+                                    {isEditing ? 'CANCELAR' : (hasKey ? 'MODIFICAR CLAVES' : 'CONECTAR API')}
                                 </button>
                             </div>
 
                             {(ex.id === 'okx' || ex.id === 'bybit') && (
-                                <div style={{ fontSize: '0.82rem', color: '#cbd5e1', background: 'rgba(56, 189, 248, 0.08)', padding: '0.5rem 0.75rem', borderRadius: '0.4rem', borderLeft: '3px solid #38bdf8', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <span>ℹ️ <strong>Aviso P2P:</strong> La extracción P2P vía API en {ex.name} requiere ser <em>Comerciante/Anunciante (Merchant)</em>. Si sos usuario estándar, cargá tus compras/ventas P2P mediante archivo CSV/Excel manual en la solapa de Cargar Archivos.</span>
+                                <div style={{
+                                    fontSize: '12px',
+                                    color: '#94A3B8',
+                                    background: 'rgba(79, 70, 229, 0.08)',
+                                    padding: '0.6rem 0.85rem',
+                                    borderRadius: '6px',
+                                    borderLeft: '3px solid #4F46E5',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem'
+                                }}>
+                                    <Info size={15} color="#818CF8" style={{ flexShrink: 0 }} />
+                                    <span><strong>Aviso P2P:</strong> La extracción P2P vía API en {ex.name} requiere rol de Comerciante (Merchant). Para usuarios minoristas, importa tu extracto CSV/Excel en la sección Cargar Archivos.</span>
                                 </div>
                             )}
 
                             {isEditing && (
-                                <div style={{ background: 'rgba(0,0,0,0.2)', padding: '1.5rem', borderRadius: '0.5rem', marginTop: '0.5rem', border: '1px solid var(--border-color)' }}>
-                                    <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1.5rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
-                                        <AlertCircle size={16} color="var(--accent-cyan)" style={{ flexShrink: 0, marginTop: '2px' }} />
-                                        <span>Genera una clave API en tu cuenta de {ex.name} con permisos de lectura (<strong>Read-only</strong>). No compartas tus claves con nadie. Las claves se guardan encriptadas localmente en tu dispositivo.</span>
-                                    </p>
+                                <div style={{
+                                    background: '#090D14',
+                                    padding: '1.25rem',
+                                    borderRadius: '8px',
+                                    marginTop: '0.25rem',
+                                    border: '1px solid rgba(255,255,255,0.08)'
+                                }}>
+                                    <div style={{
+                                        fontSize: '13px',
+                                        color: '#94A3B8',
+                                        marginBottom: '1.25rem',
+                                        display: 'flex',
+                                        gap: '0.6rem',
+                                        alignItems: 'flex-start',
+                                        background: 'rgba(255,255,255,0.03)',
+                                        padding: '0.75rem',
+                                        borderRadius: '6px'
+                                    }}>
+                                        <Shield size={16} color="#10B981" style={{ flexShrink: 0, marginTop: '2px' }} />
+                                        <span>Genera una clave API con permisos exclusivos de lectura (<strong>Read-only</strong>). Tus credenciales se almacenan localmente y nunca se envían a servidores externos.</span>
+                                    </div>
 
                                     <div style={{ display: 'grid', gap: '1rem' }}>
                                         <div>
-                                            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>API Key</label>
+                                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: '#94A3B8', marginBottom: '0.35rem' }}>API Key</label>
                                             <input
                                                 type="text"
-                                                placeholder={hasKey ? envKeys[ex.keyName] : "Ingresa tu API Key"}
+                                                className="input-field"
+                                                placeholder={hasKey ? envKeys[ex.keyName] : "Ingresa tu API Key pública"}
                                                 value={formData.key}
                                                 onChange={e => setFormData({ ...formData, key: e.target.value })}
-                                                style={{ width: '100%', padding: '0.8rem', borderRadius: '0.3rem', background: '#0f172a', border: '1px solid #334155', color: 'white' }}
+                                                style={{ width: '100%', boxSizing: 'border-box' }}
                                             />
                                         </div>
                                         <div>
-                                            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Secret Key</label>
+                                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: '#94A3B8', marginBottom: '0.35rem' }}>Secret Key</label>
                                             <input
                                                 type="password"
-                                                placeholder={hasKey ? "••••••••••••••••" : "Ingresa tu Secret Key"}
+                                                className="input-field"
+                                                placeholder={hasKey ? "••••••••••••••••" : "Ingresa tu Secret Key privada"}
                                                 value={formData.secret}
                                                 onChange={e => setFormData({ ...formData, secret: e.target.value })}
-                                                style={{ width: '100%', padding: '0.8rem', borderRadius: '0.3rem', background: '#0f172a', border: '1px solid #334155', color: 'white' }}
+                                                style={{ width: '100%', boxSizing: 'border-box' }}
                                             />
                                         </div>
                                         {ex.needsPassword && (
                                             <div>
-                                                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>API Password / Passphrase</label>
+                                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: '#94A3B8', marginBottom: '0.35rem' }}>API Password / Passphrase</label>
                                                 <input
                                                     type="password"
-                                                    placeholder={hasKey ? "••••••••••••••••" : `Ingresa la contraseña de API de ${ex.name}`}
+                                                    className="input-field"
+                                                    placeholder={hasKey ? "••••••••••••••••" : `Passphrase configurada en ${ex.name}`}
                                                     value={formData.password}
                                                     onChange={e => setFormData({ ...formData, password: e.target.value })}
-                                                    style={{ width: '100%', padding: '0.8rem', borderRadius: '0.3rem', background: '#0f172a', border: '1px solid #334155', color: 'white' }}
+                                                    style={{ width: '100%', boxSizing: 'border-box' }}
                                                 />
                                             </div>
                                         )}
                                         <button
                                             className="btn-primary"
-                                            style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginTop: '0.5rem' }}
+                                            style={{
+                                                display: 'flex',
+                                                justifyContent: 'center',
+                                                gap: '0.5rem',
+                                                alignItems: 'center',
+                                                marginTop: '0.5rem',
+                                                padding: '0.65rem'
+                                            }}
                                             onClick={() => handleSave(ex)}
-                                            disabled={!formData.key && !formData.secret} // Allow saving if at least one is typed, mostly both
+                                            disabled={!formData.key && !formData.secret}
                                         >
-                                            <Save size={18} /> GUARDAR CLAVES LOCALMENTE
+                                            <Save size={16} /> GUARDAR CREDENCIALES LOCALES
                                         </button>
                                     </div>
                                 </div>
@@ -333,6 +469,7 @@ function APIs() {
                 })}
             </div>
         </div>
-    )
+    );
 }
+
 export default APIs;

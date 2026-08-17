@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Calendar as CalendarIcon, ShieldCheck, AlertTriangle, FileText,
   Plus, Trash2, Download, RefreshCw, CheckCircle2, Clock, UploadCloud, X,
-  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Sparkles, Wand2, Info, ArrowRight, HelpCircle, Check
+  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Sparkles, Wand2, Info, ArrowRight, HelpCircle, Check, Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
@@ -13,6 +13,7 @@ const API_BASE = `${config.API_URL}/api`;
 
 const Calendar = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const searchParams = new URLSearchParams(location.search);
   const initialTab = searchParams.get('tab') === 'warnings' ? 'warnings' : 'certifications';
 
@@ -49,7 +50,7 @@ const Calendar = () => {
     }));
   };
 
-  // Sleek Glassmorphism Toast Notification State
+  // Toast Notification State
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
 
   const showToast = (message, type = 'info') => {
@@ -63,7 +64,6 @@ const Calendar = () => {
     showToast(`⚡ Sincronizando API de ${exName}...`, 'info');
     try {
       const res = await axios.post(`${API_BASE}/sync`);
-      const data = res.data || {};
       showToast(`✓ Sincronización completada para ${exName}. Movimientos actualizados.`, 'success');
       if (typeof fetchWarningsAndGaps === 'function') {
         fetchWarningsAndGaps();
@@ -84,7 +84,7 @@ const Calendar = () => {
     setSyncingAllApis(true);
     showToast('⚡ Auto-sincronizando APIs activas (Binance, Bitso, Bitget, OKX, Bybit)...', 'info');
     try {
-      const res = await axios.post(`${API_BASE}/sync`);
+      await axios.post(`${API_BASE}/sync`);
       showToast('✓ APIs sincronizadas correctamente. Reevaluando advertencias...', 'success');
       if (typeof fetchWarningsAndGaps === 'function') {
         await fetchWarningsAndGaps();
@@ -114,7 +114,6 @@ const Calendar = () => {
       const results = data.files || [];
       const total = data.total_transactions || 0;
 
-      // Check if any file reported an error during processing
       const errorItem = results.find((r) => r.error);
       if (errorItem) {
         const errText = errorItem.error || 'Error al procesar el archivo.';
@@ -148,7 +147,7 @@ const Calendar = () => {
       } else if (err.message && err.message !== 'Network Error') {
         errMsg = err.message;
       } else {
-        errMsg = 'Error de conexión con el servidor backend (verificá que el servidor esté en ejecución).';
+        errMsg = 'Error de conexión con el servidor backend.';
       }
       setInModalUploadMsg({ type: 'error', text: `⚠️ ${errMsg}` });
       showToast(`⚠️ ${errMsg}`, 'error');
@@ -237,7 +236,7 @@ const Calendar = () => {
   // Batch / Multi-file Upload Queue State
   const [fileQueue, setFileQueue] = useState([]);
 
-  // Selected Timeline Year State (Defaults to current year, dynamic multi-year navigation)
+  // Selected Timeline Year State
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [hoveredMonth, setHoveredMonth] = useState(null);
 
@@ -268,8 +267,6 @@ const Calendar = () => {
             today: new Date().toISOString().split('T')[0]
           }
         });
-      } else {
-        console.error('Error in API response:', data?.error);
       }
     } catch (err) {
       console.error('Error fetching certifications:', err);
@@ -354,7 +351,6 @@ const Calendar = () => {
           return item;
         });
 
-        // Sync with formData if single file mode
         if (nextQueue.length === 1 && nextQueue[0].id === fileItem.id) {
           const first = nextQueue[0];
           setFormData((fPrev) => ({
@@ -384,11 +380,6 @@ const Calendar = () => {
     }
   };
 
-
-
-
-
-
   const handleFilesAdd = (selectedFiles) => {
     if (!selectedFiles || selectedFiles.length === 0) return;
     const filesArray = Array.from(selectedFiles);
@@ -410,7 +401,6 @@ const Calendar = () => {
         progress: 10,
         parsedSuccess: false
       };
-
     });
 
     setFileQueue((prev) => {
@@ -485,15 +475,12 @@ const Calendar = () => {
 
   const openNewCertificationModal = async () => {
     setFileQueue([]);
-
-    // Obtener el start_date sugerido desde el backend (last_end + 1 segundo)
     let suggestedStart = '';
     let suggestedMsg = '';
     try {
       const res = await fetch(`${API_BASE}/certifications/next_start`);
       const data = await res.json();
       if (data.next_start_date) {
-        // Mostrar solo la fecha YYYY-MM-DD en el campo de tipo date del formulario
         suggestedStart = data.next_start_date.split(' ')[0];
         suggestedMsg = `📅 Inicio sugerido: ${suggestedStart} (continuación desde el fin de la última certificación)`;
       }
@@ -659,13 +646,11 @@ const Calendar = () => {
         method: 'DELETE'
       });
       if (res.ok) {
-        // Optimistically remove from state for an immediate smooth response
         setCertData((prev) => ({
           ...prev,
           certifications: (prev.certifications || []).filter((c) => c.id !== deleteConfirm.id)
         }));
         setDeleteConfirm({ show: false, id: null, title: '', deleting: false });
-        // Silently sync server state & coverage calculations without resetting or flashing page loading
         fetchCertifications(true);
         window.dispatchEvent(new Event('certifications_updated'));
       } else {
@@ -739,18 +724,12 @@ const Calendar = () => {
 
   const certificationsList = Array.isArray(certData?.certifications) ? certData.certifications : [];
 
-  const cleanDateOnly = (dStr) => {
-    if (!dStr) return '';
-    return String(dStr).trim().split(' ')[0].split('T')[0];
-  };
-
   const parseCleanDate = (dateStr, isEnd = false) => {
     if (!dateStr) return null;
     let str = String(dateStr).trim();
     if (str.includes(' ')) str = str.split(' ')[0];
     if (str.includes('T')) str = str.split('T')[0];
 
-    // Handle DD/MM/YYYY
     if (str.includes('/')) {
       const parts = str.split('/');
       if (parts.length === 3) {
@@ -765,7 +744,6 @@ const Calendar = () => {
       }
     }
 
-    // Handle YYYY-MM-DD or DD-MM-YYYY
     if (str.includes('-')) {
       const parts = str.split('-');
       if (parts.length === 3) {
@@ -791,9 +769,8 @@ const Calendar = () => {
     return isNaN(d.getTime()) ? null : d;
   };
 
-  // Dynamic Year List (Generates a 15-year window around current year + any certification years)
   const currentYr = new Date().getFullYear();
-  const baseYearRange = Array.from({ length: 15 }, (_, i) => currentYr - 10 + i); // 2016 to 2030
+  const baseYearRange = Array.from({ length: 15 }, (_, i) => currentYr - 10 + i);
   const certYears = certificationsList.flatMap((c) => {
     if (!c) return [];
     const sObj = parseCleanDate(c.start_date);
@@ -805,14 +782,12 @@ const Calendar = () => {
 
   const availableYears = Array.from(new Set([...baseYearRange, ...certYears])).sort((a, b) => a - b);
 
-  // Distinct color palette for certification brackets
   const CERT_COLORS = [
-    { border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.18)', text: '#38bdf8', lightBg: 'rgba(56, 189, 248, 0.08)' }, // Cyan
-    { border: '#a855f7', bg: 'rgba(168, 85, 247, 0.18)', text: '#c084fc', lightBg: 'rgba(168, 85, 247, 0.08)' }, // Purple
-    { border: '#10b981', bg: 'rgba(16, 185, 129, 0.18)', text: '#34d399', lightBg: 'rgba(16, 185, 129, 0.08)' }, // Emerald
-    { border: '#ec4899', bg: 'rgba(236, 72, 153, 0.18)', text: '#f472b6', lightBg: 'rgba(236, 72, 153, 0.08)' }, // Pink
-    { border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.18)', text: '#fbbf24', lightBg: 'rgba(245, 158, 11, 0.08)' }, // Amber
-    { border: '#6366f1', bg: 'rgba(99, 102, 241, 0.18)', text: '#818cf8', lightBg: 'rgba(99, 102, 241, 0.08)' }, // Indigo
+    { border: '#4F46E5', bg: 'rgba(79, 70, 229, 0.18)', text: '#818CF8', lightBg: 'rgba(79, 70, 229, 0.08)' },
+    { border: '#10B981', bg: 'rgba(16, 185, 129, 0.18)', text: '#34D399', lightBg: 'rgba(16, 185, 129, 0.08)' },
+    { border: '#06B6D4', bg: 'rgba(6, 182, 212, 0.18)', text: '#38BDF8', lightBg: 'rgba(6, 182, 212, 0.08)' },
+    { border: '#8B5CF6', bg: 'rgba(139, 92, 246, 0.18)', text: '#C084FC', lightBg: 'rgba(139, 92, 246, 0.08)' },
+    { border: '#F59E0B', bg: 'rgba(245, 158, 11, 0.18)', text: '#FBBF24', lightBg: 'rgba(245, 158, 11, 0.08)' }
   ];
 
   const getCertColor = (cert) => {
@@ -824,7 +799,6 @@ const Calendar = () => {
 
   const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-  // Helper to format date with time if present
   const formatDateTime = (dateStr, fallbackStr) => {
     if (!dateStr && !fallbackStr) return '';
     const targetStr = dateStr || fallbackStr;
@@ -852,15 +826,9 @@ const Calendar = () => {
       }
       return `${formattedDate} 00:00:00`;
     }
-    if (parts.length > 1) {
-      const cleanTime = timePart.split('.')[0];
-      const fullTime = cleanTime.length === 5 ? `${cleanTime}:00` : cleanTime.slice(0, 8);
-      return `${parts[0]} ${fullTime}`;
-    }
     return targetStr;
   };
 
-  // Get certifications covering a specific month of the selected year
   const getCertsForMonth = (monthIndex) => {
     const startOfMonth = new Date(selectedYear, monthIndex, 1, 0, 0, 0);
     const endOfMonth = new Date(selectedYear, monthIndex + 1, 0, 23, 59, 59);
@@ -874,7 +842,6 @@ const Calendar = () => {
     });
   };
 
-  // Calculate coverage status for each month of selected year
   const getMonthCoverageStatus = (monthIndex) => {
     const monthCerts = getCertsForMonth(monthIndex);
     const startOfMonth = new Date(selectedYear, monthIndex, 1);
@@ -885,7 +852,6 @@ const Calendar = () => {
     return 'pending';
   };
 
-  // Compute active certification brackets spanning months in the selected year (with distinct height levels)
   const getYearCertificationBrackets = () => {
     const yearStart = new Date(selectedYear, 0, 1, 0, 0, 0);
     const yearEnd = new Date(selectedYear, 11, 31, 23, 59, 59);
@@ -896,28 +862,18 @@ const Calendar = () => {
         const cStart = parseCleanDate(cert.start_date);
         const cEnd = parseCleanDate(cert.end_date, true);
         if (!cStart || !cEnd) return null;
-
         if (cStart > yearEnd || cEnd < yearStart) return null;
 
         let startMonth = cStart < yearStart ? 0 : cStart.getMonth();
         let endMonth = cEnd > yearEnd ? 11 : cEnd.getMonth();
-
         const colorScheme = getCertColor(cert);
 
-        return {
-          cert,
-          startMonth,
-          endMonth,
-          colorScheme,
-          cStart,
-          cEnd
-        };
+        return { cert, startMonth, endMonth, colorScheme, cStart, cEnd };
       })
       .filter(Boolean);
 
     rawList.sort((a, b) => a.cStart - b.cStart);
 
-    // Assign minimal rows (height levels) to prevent horizontal collision
     const rows = [];
     rawList.forEach((b) => {
       let placed = false;
@@ -944,38 +900,52 @@ const Calendar = () => {
   const activeBrackets = getYearCertificationBrackets();
 
   return (
-    <div style={{ padding: '2rem 2.5rem', maxWidth: '1400px', margin: '0 auto', color: 'var(--text-primary)' }}>
+    <div style={{ padding: '1.75rem 2rem', maxWidth: '1400px', margin: '0 auto', color: 'var(--text-primary)' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
         <div>
-          <h1 style={{ fontSize: '1.8rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.75rem', margin: 0 }}>
-            <CalendarIcon size={32} style={{ color: 'var(--accent-cyan)' }} />
-            Calendario de Operaciones y Certificaciones
-          </h1>
-          <p style={{ color: 'var(--text-secondary)', margin: '0.4rem 0 0 0', fontSize: '0.95rem' }}>
-            Control de períodos auditados, inconsistencias FIFO, faltantes de P2P y dictámenes contables
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <div style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '8px',
+              background: 'var(--brand-indigo-subtle)',
+              border: '1px solid var(--brand-indigo-border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--brand-indigo-light)'
+            }}>
+              <CalendarIcon size={20} />
+            </div>
+            <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#F8FAFC', margin: 0, letterSpacing: '-0.02em' }}>
+              Calendario de Operaciones & Auditoría FIFO
+            </h1>
+          </div>
+          <p style={{ color: 'var(--text-secondary)', margin: '0.35rem 0 0 0', fontSize: '0.88rem', paddingLeft: '2.85rem' }}>
+            Línea temporal de períodos certificados, dictámenes C.P.N., consistencia FIFO y auditoría diaria.
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
           <button
             onClick={openPonteAlDiaModal}
             className="btn-primary"
             style={{
-              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+              background: 'linear-gradient(135deg, #F59E0B, #D97706)',
               border: 'none',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem',
-              fontWeight: '700',
+              gap: '0.45rem',
+              fontWeight: 700,
               color: '#fff',
               boxShadow: '0 4px 14px rgba(245, 158, 11, 0.35)'
             }}
           >
-            <Sparkles size={18} />
+            <Sparkles size={16} />
             Ponete al Día
             {(gaps.length + anomalies.length) > 0 && (
-              <span style={{ background: 'rgba(0,0,0,0.3)', padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.75rem' }}>
+              <span style={{ background: 'rgba(0,0,0,0.3)', padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.72rem' }}>
                 {gaps.length + anomalies.length}
               </span>
             )}
@@ -987,26 +957,26 @@ const Calendar = () => {
                 await fetch(`${API_BASE}/certifications/sync`, { method: 'POST' });
                 fetchCertifications();
                 fetchWarningsAndGaps();
-                alert("Sincronización de cobertura legal realizada con éxito.");
+                showToast("Sincronización de cobertura legal realizada con éxito.", "success");
               } catch (err) {
                 console.error(err);
               }
             }}
-            className="btn-primary"
-            style={{ background: 'rgba(52, 211, 153, 0.15)', border: '1px solid #34d399', color: '#a7f3d0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            className="btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
             title="Vincular transacciones con calendario certificado"
           >
-            <ShieldCheck size={18} />
+            <ShieldCheck size={16} color="#34D399" />
             Sincronizar Cobertura
           </button>
 
           <button
             onClick={() => { fetchCertifications(); fetchWarningsAndGaps(); }}
-            className="btn-primary"
-            style={{ background: 'rgba(30, 41, 59, 0.8)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            className="btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
             title="Actualizar datos"
           >
-            <RefreshCw size={18} className={(loading || loadingWarnings) ? 'spin' : ''} />
+            <RefreshCw size={16} className={(loading || loadingWarnings) ? 'spin' : ''} />
             Refrescar
           </button>
 
@@ -1014,9 +984,9 @@ const Calendar = () => {
             <button
               onClick={openNewCertificationModal}
               className="btn-primary"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}
             >
-              <Plus size={18} />
+              <Plus size={16} />
               Nueva Certificación
             </button>
           )}
@@ -1024,56 +994,65 @@ const Calendar = () => {
       </div>
 
       {/* Tabs Selector Bar */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.75rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
+      <div style={{
+        display: 'flex',
+        gap: '0.5rem',
+        marginBottom: '1.5rem',
+        background: '#0D131F',
+        padding: '0.3rem',
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--border-color)',
+        width: 'fit-content'
+      }}>
         <button
           onClick={() => setActiveTab('certifications')}
           style={{
-            background: activeTab === 'certifications' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
-            border: activeTab === 'certifications' ? '1px solid #38bdf8' : '1px solid transparent',
-            color: activeTab === 'certifications' ? '#38bdf8' : 'var(--text-secondary)',
-            padding: '0.65rem 1.25rem',
-            borderRadius: '0.6rem',
-            fontWeight: '600',
-            fontSize: '0.92rem',
+            background: activeTab === 'certifications' ? 'var(--brand-indigo)' : 'transparent',
+            border: 'none',
+            color: activeTab === 'certifications' ? '#FFFFFF' : 'var(--text-secondary)',
+            padding: '0.5rem 1.1rem',
+            borderRadius: 'var(--radius-sm)',
+            fontWeight: 600,
+            fontSize: '0.85rem',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '0.5rem',
-            transition: 'all 0.2s ease'
+            gap: '0.45rem',
+            transition: 'all 150ms ease'
           }}
         >
-          <ShieldCheck size={18} />
-          Dictámenes & Certificaciones Contables
+          <ShieldCheck size={16} />
+          Dictámenes & Certificaciones Contables ({certData.certifications.length})
         </button>
 
         <button
           onClick={() => setActiveTab('warnings')}
           style={{
-            background: activeTab === 'warnings' ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
-            border: activeTab === 'warnings' ? '1px solid #f59e0b' : '1px solid transparent',
-            color: activeTab === 'warnings' ? '#fbbf24' : 'var(--text-secondary)',
-            padding: '0.65rem 1.25rem',
-            borderRadius: '0.6rem',
-            fontWeight: '600',
-            fontSize: '0.92rem',
+            background: activeTab === 'warnings' ? 'var(--brand-indigo)' : 'transparent',
+            border: 'none',
+            color: activeTab === 'warnings' ? '#FFFFFF' : 'var(--text-secondary)',
+            padding: '0.5rem 1.1rem',
+            borderRadius: 'var(--radius-sm)',
+            fontWeight: 600,
+            fontSize: '0.85rem',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '0.5rem',
-            transition: 'all 0.2s ease'
+            gap: '0.45rem',
+            transition: 'all 150ms ease'
           }}
         >
-          <AlertTriangle size={18} color={activeTab === 'warnings' ? '#fbbf24' : 'currentColor'} />
-          Operaciones & Advertencias
+          <AlertTriangle size={16} color={activeTab === 'warnings' ? '#FEF08A' : 'var(--accent-amber-light)'} />
+          Operaciones & Inconsistencias
           {(gaps.length + anomalies.length) > 0 && (
             <span style={{
-              background: '#ef4444',
+              background: '#EF4444',
               color: '#fff',
-              fontSize: '0.75rem',
-              fontWeight: '700',
-              padding: '0.15rem 0.55rem',
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              padding: '0.1rem 0.45rem',
               borderRadius: '999px',
-              marginLeft: '0.3rem'
+              marginLeft: '0.2rem'
             }}>
               {gaps.length + anomalies.length}
             </span>
@@ -1084,82 +1063,89 @@ const Calendar = () => {
       {activeTab === 'warnings' ? (
         <div>
           {/* KPI Summary Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-            <div className="glass-card" style={{ padding: '1.5rem', borderRadius: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.8rem' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Estado de Consistencia</span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div className="card-surface" style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Estado de Consistencia
+                </span>
                 {(gaps.length + anomalies.length) === 0 ? (
-                  <span className="badge badge-green" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <CheckCircle2 size={14} /> Historial Consistente
+                  <span className="badge badge-emerald">
+                    <CheckCircle2 size={12} /> Historial Consistente
                   </span>
                 ) : (
-                  <span className="badge badge-red" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <AlertTriangle size={14} /> Advertencias Pendientes
+                  <span className="badge badge-amber">
+                    <AlertTriangle size={12} /> Advertencias Activas
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: (gaps.length + anomalies.length) === 0 ? '#4ade80' : '#fbbf24' }}>
-                {(gaps.length + anomalies.length) === 0 ? 'Sin Advertencias' : `${gaps.length + anomalies.length} Inconsistencia(s)`}
+              <div style={{ fontSize: '1.45rem', fontWeight: 700, color: (gaps.length + anomalies.length) === 0 ? '#34D399' : '#FBBF24' }} className="font-mono">
+                {(gaps.length + anomalies.length) === 0 ? 'Sin Advertencias' : `${gaps.length + anomalies.length} Faltante(s)`}
               </div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.4rem' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                 {(gaps.length + anomalies.length) === 0
-                  ? 'Todas tus operaciones tienen respaldo y compras previas registradas'
-                  : 'Faltan compras o datos de adquisición para cubrir algunas ventas o P2P'}
+                  ? 'Todas las ventas tienen comprobantes de compra previos.'
+                  : 'Faltan compras o adquisiciones para cubrir salidas FIFO.'}
               </div>
             </div>
 
-            <div className="glass-card" style={{ padding: '1.5rem', borderRadius: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.8rem' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Exchanges Afectados</span>
-                <Sparkles size={20} style={{ color: 'var(--accent-purple)' }} />
+            <div className="card-surface" style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Exchanges con Huecos
+                </span>
+                <Sparkles size={18} color="var(--brand-indigo-light)" />
               </div>
-              <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+              <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#F8FAFC' }}>
                 {Array.from(new Set([...gaps.map(g => g.exchange), ...anomalies.map(a => a.exchange)])).join(', ') || 'Ninguno'}
               </div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.4rem' }}>
-                Revisá y completá la información exchange por exchange de forma guiada
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                Revisá y completá la información exchange por exchange.
               </div>
             </div>
 
-            <div className="glass-card" style={{ padding: '1.5rem', borderRadius: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.8rem' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Acción Recomendada</span>
-                <Wand2 size={20} style={{ color: 'var(--accent-cyan)' }} />
+            <div className="card-surface" style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Resolución Guiada
+                </span>
+                <Wand2 size={18} color="var(--accent-cyan)" />
               </div>
-              <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#38bdf8' }}>
-                Resolutor Guiado
+              <div style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--brand-indigo-light)' }}>
+                Asistente Automático
               </div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.4rem' }}>
-                Hacé clic en "Resolver" para ingresar datos faltantes sin modificar archivos originales
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                Ingresá saldos iniciales o subí archivos sin modificar los originales.
               </div>
             </div>
           </div>
 
           {/* Dynamic Timeline Bar for Warnings & Coverage */}
-          <div className="glass-card" style={{ padding: '1.75rem', borderRadius: '1rem', marginBottom: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Clock size={20} style={{ color: 'var(--accent-cyan)' }} />
-                  Línea de Tiempo de Consistencia
+          <div className="card-surface" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                <Clock size={18} color="var(--brand-indigo-light)" />
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
+                  Línea de Tiempo de Consistencia & Auditoría ({selectedYear})
                 </h3>
 
-                {/* Multi-Year Selector Controls (Adelante y Atrás) */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(15, 23, 42, 0.8)', padding: '0.2rem 0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)' }}>
+                {/* Year Selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: '#0D131F', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
                   <button
                     onClick={() => setSelectedYear((prev) => prev - 1)}
                     style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                     title="Año anterior"
                   >
-                    <ChevronLeft size={18} />
+                    <ChevronLeft size={16} />
                   </button>
                   <select
                     value={selectedYear}
                     onChange={(e) => setSelectedYear(Number(e.target.value))}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--accent-cyan)', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' }}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--brand-indigo-light)', fontWeight: 700, fontSize: '0.92rem', cursor: 'pointer' }}
+                    className="font-mono"
                   >
                     {availableYears.map((yr) => (
-                      <option key={yr} value={yr} style={{ background: '#0f172a', color: 'white' }}>
+                      <option key={yr} value={yr} style={{ background: '#0D131F', color: 'white' }}>
                         {yr}
                       </option>
                     ))}
@@ -1169,32 +1155,28 @@ const Calendar = () => {
                     style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                     title="Año siguiente"
                   >
-                    <ChevronRight size={18} />
+                    <ChevronRight size={16} />
                   </button>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '1.25rem', fontSize: '0.8rem', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#22c55e' }}></div>
-                  <span>Auditado / Certificado</span>
+              <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#10B981' }}></div>
+                  <span style={{ color: 'var(--text-secondary)' }}>Auditado C.P.N.</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'repeating-linear-gradient(45deg, #f59e0b, #f59e0b 4px, #d97706 4px, #d97706 8px)' }}></div>
-                  <span>Advertencia / Hueco</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#F59E0B' }}></div>
+                  <span style={{ color: 'var(--text-secondary)' }}>Advertencia / Hueco</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#38bdf8' }}></div>
-                  <span>Ponete al Día</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'rgba(255,255,255,0.1)' }}></div>
-                  <span>Futuro</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#4F46E5' }}></div>
+                  <span style={{ color: 'var(--text-secondary)' }}>Provisorio al Día</span>
                 </div>
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '0.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '0.45rem' }}>
               {months.map((monthName, mIdx) => {
                 const today = new Date();
                 const currentYear = today.getFullYear();
@@ -1209,52 +1191,41 @@ const Calendar = () => {
                 const monthCerts = getCertsForMonth(mIdx);
                 const hasGaps = monthGaps.length > 0;
                 const isCertified = monthCerts.length > 0;
-                const certTitles = monthCerts.map(c => c.title || c.cpa_name || 'Certificación Contable').join(' | ');
 
-                // Calculate visual state
-                let bg = 'rgba(56, 189, 248, 0.08)';
-                let border = '1px solid rgba(56, 189, 248, 0.3)';
-                let titleColor = '#38bdf8';
-                let labelColor = '#93c5fd';
-                let labelText = '🔄 Ponete al Día';
-                let tooltipText = `Mes transcurrido sin certificación. Clic para poner al día.`;
+                let bg = 'rgba(79, 70, 229, 0.08)';
+                let border = '1px solid rgba(79, 70, 229, 0.25)';
+                let titleColor = '#818CF8';
+                let labelText = 'Al Día';
 
                 if (isFuture) {
                   bg = 'rgba(15, 23, 42, 0.4)';
-                  border = '1px solid rgba(255, 255, 255, 0.05)';
-                  titleColor = '#64748b';
-                  labelColor = '#475569';
-                  labelText = 'Futuro';
-                  tooltipText = `Mes futuro (${monthName} ${selectedYear}). Aún no transcurrido.`;
+                  border = '1px solid var(--border-subtle)';
+                  titleColor = 'var(--text-muted)';
+                  labelText = '-';
                 } else if (isCertified) {
-                  bg = 'rgba(34, 197, 94, 0.15)';
-                  border = '1px solid #22c55e';
-                  titleColor = '#4ade80';
-                  labelColor = '#86efac';
+                  bg = 'rgba(16, 185, 129, 0.15)';
+                  border = '1px solid #10B981';
+                  titleColor = '#34D399';
                   labelText = '✓ Auditado';
-                  tooltipText = `🛡️ Período Auditado con Certificación Contable: ${certTitles}`;
                 } else if (hasGaps) {
-                  bg = 'repeating-linear-gradient(45deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.2) 6px, rgba(217, 119, 6, 0.3) 6px, rgba(217, 119, 6, 0.3) 12px)';
-                  border = '1px solid #f59e0b';
-                  titleColor = '#fbbf24';
-                  labelColor = '#fef08a';
+                  bg = 'rgba(245, 158, 11, 0.18)';
+                  border = '1px solid #F59E0B';
+                  titleColor = '#FBBF24';
                   labelText = '⚠️ Hueco';
-                  tooltipText = `⚠️ ${monthGaps.length} advertencia(s) de consistencia en ${monthName} ${selectedYear}. Clic para resolver.`;
                 }
 
                 return (
                   <div
                     key={monthName}
-                    title={tooltipText}
                     style={{
                       background: bg,
                       border: border,
-                      borderRadius: '0.6rem',
-                      padding: '0.75rem 0.5rem',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.65rem 0.35rem',
                       textAlign: 'center',
                       cursor: (!isFuture) ? 'pointer' : 'default',
-                      transition: 'transform 0.15s ease',
-                      opacity: isFuture ? 0.6 : 1
+                      transition: 'all 150ms ease',
+                      opacity: isFuture ? 0.45 : 1
                     }}
                     onClick={() => {
                       if (hasGaps && monthGaps[0]) {
@@ -1266,8 +1237,8 @@ const Calendar = () => {
                       }
                     }}
                   >
-                    <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: titleColor }}>{monthName}</div>
-                    <div style={{ fontSize: '0.7rem', marginTop: '0.3rem', color: labelColor }}>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 700, color: titleColor }}>{monthName}</div>
+                    <div style={{ fontSize: '0.68rem', marginTop: '0.2rem', color: titleColor }}>
                       {labelText}
                     </div>
                   </div>
@@ -1276,7 +1247,7 @@ const Calendar = () => {
             </div>
           </div>
 
-          {/* Pending Warnings List - Grouped by Exchange */}
+          {/* Grouped Warnings List by Exchange */}
           {(() => {
             const allWarningsList = [
               ...gaps.map(g => ({ ...g, isGap: true })),
@@ -1296,38 +1267,29 @@ const Calendar = () => {
               : exchangeNames.filter(name => name === selectedExchangeFilter);
 
             return (
-              <div className="glass-card" style={{ padding: '1.75rem', borderRadius: '1rem' }}>
+              <div className="card-surface" style={{ padding: '1.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <AlertTriangle size={20} color="#f59e0b" />
-                    Lista de Advertencias Agrupadas por Exchange ({allWarningsList.length})
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <AlertTriangle size={18} color="#F59E0B" />
+                    Inconsistencias y Huecos FIFO por Exchange ({allWarningsList.length})
                   </h3>
                 </div>
 
                 {allWarningsList.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-secondary)' }}>
-                    <CheckCircle2 size={48} color="#4ade80" style={{ margin: '0 auto 1rem', opacity: 0.8 }} />
-                    <h4 style={{ fontSize: '1.1rem', color: '#f8fafc', margin: '0 0 0.5rem' }}>¡Sin Advertencias Pendientes!</h4>
-                    <p style={{ fontSize: '0.9rem', margin: 0 }}>Tus archivos cargados y movimientos tienen consistencia completa y compras previas registradas.</p>
+                  <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                    <CheckCircle2 size={42} color="#34D399" style={{ margin: '0 auto 0.75rem', opacity: 0.9 }} />
+                    <h4 style={{ fontSize: '1.1rem', color: '#F8FAFC', margin: '0 0 0.25rem' }}>¡Historial 100% Consistente!</h4>
+                    <p style={{ fontSize: '0.85rem', margin: 0 }}>Todas tus transacciones cuentan con compras previas registradas y respaldo formal.</p>
                   </div>
                 ) : (
                   <div>
-                    {/* Exchange Filter Pills Header */}
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem', background: 'rgba(15, 23, 42, 0.6)', padding: '0.75rem', borderRadius: '0.75rem', border: '1px solid var(--border-color)' }}>
+                    {/* Minimalist Filter Chips Header */}
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
                       <button
                         onClick={() => setSelectedExchangeFilter('ALL')}
-                        style={{
-                          background: selectedExchangeFilter === 'ALL' ? 'linear-gradient(135deg, #38bdf8, #0284c7)' : 'rgba(30, 41, 59, 0.8)',
-                          color: selectedExchangeFilter === 'ALL' ? '#fff' : 'var(--text-secondary)',
-                          border: selectedExchangeFilter === 'ALL' ? 'none' : '1px solid var(--border-color)',
-                          padding: '0.45rem 0.9rem',
-                          borderRadius: '0.5rem',
-                          fontSize: '0.82rem',
-                          fontWeight: '600',
-                          cursor: 'pointer'
-                        }}
+                        className={`chip ${selectedExchangeFilter === 'ALL' ? 'active' : ''}`}
                       >
-                        Todos los Exchanges ({allWarningsList.length})
+                        Todos ({allWarningsList.length})
                       </button>
 
                       {exchangeNames.map((exName) => {
@@ -1337,130 +1299,100 @@ const Calendar = () => {
                           <button
                             key={exName}
                             onClick={() => setSelectedExchangeFilter(exName)}
-                            style={{
-                              background: isActive ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'rgba(30, 41, 59, 0.8)',
-                              color: isActive ? '#fff' : 'var(--text-secondary)',
-                              border: isActive ? 'none' : '1px solid var(--border-color)',
-                              padding: '0.45rem 0.9rem',
-                              borderRadius: '0.5rem',
-                              fontSize: '0.82rem',
-                              fontWeight: '600',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.4rem'
-                            }}
+                            className={`chip ${isActive ? 'active-amber' : ''}`}
                           >
-                            {exName}
-                            <span style={{ background: 'rgba(0,0,0,0.3)', padding: '0.1rem 0.45rem', borderRadius: '0.4rem', fontSize: '0.75rem', color: '#fef08a' }}>
-                              {count}
-                            </span>
+                            {exName} ({count})
                           </button>
                         );
                       })}
                     </div>
 
                     {/* Grouped Accordions by Exchange */}
-                    <div style={{ display: 'grid', gap: '1.25rem' }}>
+                    <div style={{ display: 'grid', gap: '1rem' }}>
                       {filteredNames.map((exName) => {
                         const items = groupedExchanges[exName] || [];
-                        const isExpanded = expandedExchanges[exName] !== false; // expanded by default
+                        const isExpanded = expandedExchanges[exName] !== false;
                         const limit = exchangeLimits[exName] || 10;
                         const visibleItems = items.slice(0, limit);
 
                         return (
-                          <div key={exName} style={{ background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '0.85rem', overflow: 'hidden' }}>
-                            {/* Accordion Group Header */}
+                          <div key={exName} style={{ background: '#0D131F', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                            {/* Header */}
                             <div
                               style={{
-                                padding: '1rem 1.25rem',
-                                background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95))',
+                                padding: '0.85rem 1.15rem',
+                                background: 'var(--bg-elevated)',
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
                                 cursor: 'pointer',
-                                userSelect: 'none',
-                                borderBottom: isExpanded ? '1px solid rgba(255, 255, 255, 0.08)' : 'none'
+                                borderBottom: isExpanded ? '1px solid var(--border-color)' : 'none'
                               }}
                               onClick={() => toggleExchangeExpand(exName)}
                             >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                                <span className="badge badge-amber" style={{ fontSize: '0.9rem', fontWeight: 'bold', padding: '0.35rem 0.75rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                                <span className="badge badge-amber" style={{ fontSize: '0.8rem', fontWeight: 700 }}>
                                   {exName}
                                 </span>
-                                <span style={{ fontSize: '0.92rem', color: '#f8fafc', fontWeight: '600' }}>
-                                  {items.length} Inconsistencia(s) detectadas
+                                <span style={{ fontSize: '0.88rem', color: '#F8FAFC', fontWeight: 600 }}>
+                                  {items.length} Inconsistencia(s)
                                 </span>
                               </div>
 
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                                 <button
                                   className="btn-primary"
-                                  style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none', padding: '0.45rem 0.9rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#fff', fontWeight: '600' }}
+                                  style={{ background: 'linear-gradient(135deg, #F59E0B, #D97706)', border: 'none', padding: '0.35rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#fff', fontWeight: 600 }}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     if (items[0]) openResolverModal(items[0]);
                                   }}
                                 >
-                                  <Wand2 size={14} />
+                                  <Wand2 size={13} />
                                   Resolver {exName} →
                                 </button>
-
-                                <button style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-                                  {isExpanded ? <ChevronUp size={22} /> : <ChevronDown size={22} />}
-                                </button>
+                                <span style={{ color: 'var(--text-muted)' }}>
+                                  {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                                </span>
                               </div>
                             </div>
 
-                            {/* Accordion Group Items List */}
+                            {/* Items List */}
                             {isExpanded && (
-                              <div style={{ padding: '1rem', display: 'grid', gap: '0.75rem' }}>
+                              <div style={{ padding: '0.75rem', display: 'grid', gap: '0.5rem' }}>
                                 {visibleItems.map((item, idx) => (
                                   <div
                                     key={`${exName}-${idx}`}
                                     style={{
-                                      background: 'rgba(15, 23, 42, 0.9)',
-                                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                                      borderRadius: '0.65rem',
-                                      padding: '1rem 1.25rem',
+                                      background: 'rgba(15, 23, 42, 0.75)',
+                                      border: '1px solid var(--border-subtle)',
+                                      borderRadius: 'var(--radius-sm)',
+                                      padding: '0.75rem 1rem',
                                       display: 'flex',
-                                      justify: 'space-between',
+                                      justifyContent: 'space-between',
                                       alignItems: 'center',
                                       flexWrap: 'wrap',
-                                      gap: '1rem'
+                                      gap: '0.75rem'
                                     }}
                                   >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flex: 1 }}>
-                                      <div style={{ background: 'rgba(245, 158, 11, 0.15)', padding: '0.55rem', borderRadius: '0.5rem', color: '#fbbf24', flexShrink: 0 }}>
-                                        <AlertTriangle size={20} />
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+                                      <div style={{ background: 'var(--accent-amber-subtle)', padding: '0.45rem', borderRadius: 'var(--radius-sm)', color: 'var(--accent-amber-light)', flexShrink: 0 }}>
+                                        <AlertTriangle size={18} />
                                       </div>
                                       <div>
-                                        <div style={{ fontSize: '0.82rem', color: '#cbd5e1', fontWeight: '600', marginBottom: '0.2rem' }}>
+                                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600 }} className="font-mono">
                                           {item.date ? item.date.split(' ')[0] : ''}
                                         </div>
-                                        <div style={{ fontSize: '0.92rem', fontWeight: 'bold', color: '#f8fafc' }}>
+                                        <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#F8FAFC' }}>
                                           {item.isGap
                                             ? `Venta de ${item.sold_qty} ${item.coin} (Faltan ${item.deficit ? item.deficit.toFixed(4) : 0} ${item.coin} de compra previa)`
-                                            : (item.message || `Phantom Sale de ${item.missing} ${item.crypto}`)}
-                                        </div>
-                                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                                          No se encontró un registro de compra o depósito previo para cubrir la salida FIFO.
+                                            : (item.message || `Falta adquisición de ${item.missing} ${item.crypto}`)}
                                         </div>
                                       </div>
                                     </div>
 
                                     <button
-                                      className="btn-primary"
-                                      style={{
-                                        background: 'rgba(245, 158, 11, 0.18)',
-                                        border: '1px solid rgba(245, 158, 11, 0.5)',
-                                        color: '#fbbf24',
-                                        padding: '0.45rem 0.9rem',
-                                        fontSize: '0.82rem',
-                                        fontWeight: '600',
-                                        borderRadius: '0.5rem',
-                                        cursor: 'pointer'
-                                      }}
+                                      className="chip active-amber"
                                       onClick={() => openResolverModal(item)}
                                     >
                                       Resolver →
@@ -1469,21 +1401,13 @@ const Calendar = () => {
                                 ))}
 
                                 {items.length > visibleItems.length && (
-                                  <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
+                                  <div style={{ textAlign: 'center', marginTop: '0.25rem' }}>
                                     <button
                                       onClick={() => loadMoreForExchange(exName)}
-                                      style={{
-                                        background: 'rgba(30, 41, 59, 0.8)',
-                                        border: '1px solid var(--border-color)',
-                                        color: 'var(--accent-cyan)',
-                                        padding: '0.55rem 1.25rem',
-                                        borderRadius: '0.5rem',
-                                        fontSize: '0.82rem',
-                                        fontWeight: '600',
-                                        cursor: 'pointer'
-                                      }}
+                                      className="btn-secondary"
+                                      style={{ fontSize: '0.78rem', padding: '0.4rem 1rem' }}
                                     >
-                                      Mostrar más advertencias de {exName} ({items.length - visibleItems.length} restantes)...
+                                      Mostrar más ({items.length - visibleItems.length} restantes)...
                                     </button>
                                   </div>
                                 )}
@@ -1500,431 +1424,379 @@ const Calendar = () => {
           })()}
         </div>
       ) : (
+        /* Certifications Tab */
         <>
-          {/* Summary KPI Cards (100% Dynamic) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+          {/* KPI Summary Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div className="card-surface" style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Estado Auditado
+                </span>
+                {certData.summary.status === 'up_to_date' ? (
+                  <span className="badge badge-emerald">
+                    <CheckCircle2 size={12} /> Certificado al Día
+                  </span>
+                ) : (
+                  <span className="badge badge-amber">
+                    <AlertTriangle size={12} /> Certificación Pendiente
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 700, color: certData.summary.status === 'up_to_date' ? '#34D399' : '#FBBF24' }}>
+                {certData.summary.status === 'up_to_date' ? 'Período Cubierto' : 'Certificación Pendiente'}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                {certData.summary.status === 'up_to_date'
+                  ? 'Tus movimientos están respaldados formalmente.'
+                  : 'Se requiere subir dictamen contable para actualizar cobertura.'}
+              </div>
+            </div>
 
-        {/* Card 1: Status */}
-        <div className="glass-card" style={{ padding: '1.5rem', borderRadius: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.8rem' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Estado Auditado</span>
-            {certData.summary.status === 'up_to_date' ? (
-              <span className="badge badge-green" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                <CheckCircle2 size={14} /> Certificado al Día
-              </span>
-            ) : (
-              <span className="badge badge-red" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                <AlertTriangle size={14} /> Atención Requerida
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: certData.summary.status === 'up_to_date' ? '#4ade80' : '#f87171' }}>
-            {certData.summary.status === 'up_to_date' ? 'Período Cubierto' : 'Certificación Pendiente'}
-          </div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.4rem' }}>
-            {certData.summary.status === 'up_to_date'
-              ? 'Tus movimientos están respaldados formalmente'
-              : 'Se requiere subir dictamen contable para actualizar cobertura'}
-          </div>
-        </div>
+            <div className="card-surface" style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Último Período Certificado
+                </span>
+                <ShieldCheck size={18} color="var(--brand-indigo-light)" />
+              </div>
+              <div style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text-primary)' }} className="font-mono">
+                {certData.summary.latest_end_date ? (
+                  <span>Hasta {formatDateTime(certData.summary.latest_end_date)}</span>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>Sin registros</span>
+                )}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                {certData.summary.total_count > 0 ? `${certData.summary.total_count} certificación(es) registrada(s)` : 'No se han cargado certificados aún'}
+              </div>
+            </div>
 
-        {/* Card 2: Latest Certified Range */}
-        <div className="glass-card" style={{ padding: '1.5rem', borderRadius: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.8rem' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Último Período Certificado</span>
-            <ShieldCheck size={20} style={{ color: 'var(--accent-cyan)' }} />
-          </div>
-          <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
-            {certData.summary.latest_end_date ? (
-              <span>Hasta {formatDateTime(certData.summary.latest_end_date)}</span>
-            ) : (
-              <span style={{ color: 'var(--text-secondary)' }}>Sin registros</span>
-            )}
-          </div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.4rem' }}>
-            {certData.summary.total_count > 0 ? `${certData.summary.total_count} certificación(es) registrada(s)` : 'No se han cargado certificados aún'}
-          </div>
-        </div>
-
-        {/* Card 3: Days Pending */}
-        <div className="glass-card" style={{ padding: '1.5rem', borderRadius: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.8rem' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Período Sin Certificar</span>
-            <Clock size={20} style={{ color: certData.summary.uncertified_days ? '#fbbf24' : '#4ade80' }} />
-          </div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: certData.summary.uncertified_days ? '#fbbf24' : '#4ade80' }}>
-            {certData.summary.uncertified_days !== null ? `${certData.summary.uncertified_days} Días` : 'Pendiente total'}
-          </div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.4rem' }}>
-            {certData.summary.uncertified_days > 0
-              ? `Transcurridos desde el vencimiento anterior`
-              : certData.summary.uncertified_days === 0
-              ? 'Cobertura total garantizada hasta la fecha'
-              : 'Ingresá tu primer certificado contable'}
-          </div>
-        </div>
-      </div>
-
-      {/* Visual Dynamic Multi-Year Timeline Bar Chart with External Certification Brackets */}
-      <div className="glass-card" style={{ padding: '1.75rem', borderRadius: '1rem', marginBottom: '2rem', position: 'relative', zIndex: 20, overflow: 'visible' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <CalendarIcon size={20} style={{ color: 'var(--accent-purple)' }} />
-              Línea de Tiempo de Cobertura
-            </h3>
-
-            {/* Dynamic Multi-Year Selector Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(15, 23, 42, 0.8)', padding: '0.2rem 0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)' }}>
-              <button
-                onClick={() => setSelectedYear((prev) => prev - 1)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                title="Año anterior"
-              >
-                <ChevronLeft size={18} />
-              </button>
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                style={{ background: 'transparent', border: 'none', color: 'var(--accent-cyan)', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' }}
-              >
-                {availableYears.map((yr) => (
-                  <option key={yr} value={yr} style={{ background: '#0f172a', color: 'white' }}>
-                    {yr}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => setSelectedYear((prev) => prev + 1)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                title="Año siguiente"
-              >
-                <ChevronRight size={18} />
-              </button>
+            <div className="card-surface" style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Período Sin Certificar
+                </span>
+                <Clock size={18} color={certData.summary.uncertified_days ? '#FBBF24' : '#34D399'} />
+              </div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 700, color: certData.summary.uncertified_days ? '#FBBF24' : '#34D399' }} className="font-mono">
+                {certData.summary.uncertified_days !== null ? `${certData.summary.uncertified_days} Días` : 'Pendiente'}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                {certData.summary.uncertified_days > 0
+                  ? `Transcurridos desde el vencimiento anterior`
+                  : 'Cobertura garantizada hasta la fecha'}
+              </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '1.25rem', fontSize: '0.8rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#22c55e' }}></div>
-              <span>Certificado</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#f59e0b', border: '1px dashed #fbbf24' }}></div>
-              <span>Pendiente de Certificar</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'rgba(255,255,255,0.1)' }}></div>
-              <span>Período Futuro</span>
-            </div>
-          </div>
-        </div>
+          {/* Timeline Bar with Certification Brackets */}
+          <div className="card-surface" style={{ padding: '1.5rem', marginBottom: '1.5rem', position: 'relative', zIndex: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                <CalendarIcon size={18} color="var(--brand-indigo-light)" />
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
+                  Línea de Tiempo de Cobertura Legal ({selectedYear})
+                </h3>
 
-        {/* Outer Certification Grouping Brackets */}
-        {activeBrackets.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '0.4rem 0.6rem', marginBottom: '0.75rem' }}>
-            {activeBrackets.map((b, bIdx) => {
-              const spanCols = b.endMonth - b.startMonth + 1;
-              const shortTitle = b.cert.title ? b.cert.title.replace('Certificación Contable', 'Cert.').replace('Certificación', 'Cert.') : '';
-              return (
-                <div
-                  key={b.cert.id || bIdx}
-                  style={{
-                    gridColumn: `${b.startMonth + 1} / span ${spanCols}`,
-                    gridRow: `${(b.rowIndex || 0) + 1}`,
-                    background: b.colorScheme.bg,
-                    border: `1.5px solid ${b.colorScheme.border}`,
-                    borderRadius: '0.5rem',
-                    padding: '0.35rem 0.6rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justify: 'space-between',
-                    gap: '0.4rem',
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    color: b.colorScheme.text,
-                    boxShadow: `0 0 10px ${b.colorScheme.bg}`,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis'
-                  }}
-                  title={`Dictamen: ${b.cert.title} | Cobertura: ${formatDateTime(b.cert.start_date)} - ${formatDateTime(b.cert.end_date, b.cert.created_at || b.cert.issue_date)}`}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0 }}>
-                    <ShieldCheck size={14} style={{ flexShrink: 0 }} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {spanCols <= 1 ? shortTitle : b.cert.title}
-                    </span>
-                  </div>
-                  {b.cert.cpa_name && spanCols > 1 && (
-                    <span style={{ fontSize: '0.7rem', opacity: 0.85, flexShrink: 0 }}>
-                      Cr. {b.cert.cpa_name.split(' ')[0]}
-                    </span>
-                  )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: '#0D131F', padding: '0.2rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+                  <button
+                    onClick={() => setSelectedYear((prev) => prev - 1)}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                    title="Año anterior"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(Number(e.target.value))}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--brand-indigo-light)', fontWeight: 700, fontSize: '0.92rem', cursor: 'pointer' }}
+                    className="font-mono"
+                  >
+                    {availableYears.map((yr) => (
+                      <option key={yr} value={yr} style={{ background: '#0D131F', color: 'white' }}>
+                        {yr}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => setSelectedYear((prev) => prev + 1)}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                    title="Año siguiente"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
                 </div>
-              );
-            })}
-          </div>
-        )}
+              </div>
 
-        {/* Timeline Grid Bar for Selected Year */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '0.6rem', position: 'relative', zIndex: 25 }}>
-          {months.map((monthName, idx) => {
-            const monthCerts = getCertsForMonth(idx);
-            const status = getMonthCoverageStatus(idx);
-            const isShared = monthCerts.length > 1;
-
-            let bgColor = 'rgba(255, 255, 255, 0.05)';
-            let borderColor = 'rgba(255, 255, 255, 0.1)';
-            let textColor = 'var(--text-secondary)';
-
-            if (status === 'certified') {
-              if (isShared) {
-                const c1 = getCertColor(monthCerts[0]);
-                const c2 = getCertColor(monthCerts[1]);
-                bgColor = 'rgba(30, 41, 59, 0.8)';
-                borderColor = c1.border;
-                textColor = '#ffffff';
-              } else if (monthCerts.length === 1) {
-                const cScheme = getCertColor(monthCerts[0]);
-                bgColor = cScheme.lightBg;
-                borderColor = cScheme.border;
-                textColor = cScheme.text;
-              } else {
-                bgColor = 'rgba(34, 197, 94, 0.25)';
-                borderColor = '#22c55e';
-                textColor = '#4ade80';
-              }
-            } else if (status === 'pending') {
-              bgColor = 'rgba(245, 158, 11, 0.2)';
-              borderColor = '#f59e0b';
-              textColor = '#fbbf24';
-            }
-
-            return (
-              <div
-                key={monthName}
-                style={{
-                  background: bgColor,
-                  border: `1.5px solid ${borderColor}`,
-                  borderRadius: '0.6rem',
-                  padding: '0.85rem 0.4rem',
-                  textAlign: 'center',
-                  transition: 'all 0.2s ease',
-                  cursor: 'pointer',
-                  position: 'relative',
-                  zIndex: hoveredMonth === idx ? 100 : 1,
-                  boxShadow: hoveredMonth === idx ? '0 0 15px rgba(56, 189, 248, 0.3)' : 'none',
-                  transform: hoveredMonth === idx ? 'translateY(-2px)' : 'none'
-                }}
-                onMouseEnter={() => setHoveredMonth(idx)}
-                onMouseLeave={() => setHoveredMonth(null)}
-                onClick={() => {
-                  if (status === 'pending') {
-                    const startD = `${selectedYear}-${String(idx + 1).padStart(2, '0')}-01`;
-                    const endD = new Date(selectedYear, idx + 1, 0).toISOString().split('T')[0];
-                    setFormData((prev) => ({
-                      ...prev,
-                      title: `Certificación ${monthName} ${selectedYear}`,
-                      start_date: startD,
-                      end_date: endD
-                    }));
-                    setShowModal(true);
-                  }
-                }}
-              >
-                <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: textColor }}>{monthName}</div>
-                <div style={{ fontSize: '0.7rem', marginTop: '0.3rem', color: textColor, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.2rem' }}>
-                  {isShared ? (
-                    <span style={{ background: 'rgba(245, 158, 11, 0.3)', padding: '0.1rem 0.3rem', borderRadius: '0.3rem', fontSize: '0.65rem', fontWeight: 'bold', border: '1px solid #f59e0b', color: '#fbbf24' }}>
-                      ⚡ Transición
-                    </span>
-                  ) : status === 'certified' ? (
-                    '✓ Auditado'
-                  ) : status === 'pending' ? (
-                    '⚠️ Sin cert.'
-                  ) : (
-                    '-'
-                  )}
+              <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#10B981' }}></div>
+                  <span style={{ color: 'var(--text-secondary)' }}>Certificado C.P.N.</span>
                 </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#F59E0B' }}></div>
+                  <span style={{ color: 'var(--text-secondary)' }}>Pendiente</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'rgba(255,255,255,0.1)' }}></div>
+                  <span style={{ color: 'var(--text-secondary)' }}>Futuro</span>
+                </div>
+              </div>
+            </div>
 
-                {/* Floating Interactive Hover Tooltip Popover */}
-                <AnimatePresence>
-                  {hoveredMonth === idx && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -5, scale: 0.95 }}
-                      transition={{ duration: 0.15 }}
+            {/* Certification Brackets */}
+            {activeBrackets.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '0.35rem 0.5rem', marginBottom: '0.75rem' }}>
+                {activeBrackets.map((b, bIdx) => {
+                  const spanCols = b.endMonth - b.startMonth + 1;
+                  const shortTitle = b.cert.title ? b.cert.title.replace('Certificación Contable', 'Cert.').replace('Certificación', 'Cert.') : '';
+                  return (
+                    <div
+                      key={b.cert.id || bIdx}
                       style={{
-                        position: 'absolute',
-                        bottom: 'calc(100% + 10px)',
-                        top: 'auto',
-                        left: idx > 8 ? 'auto' : idx < 3 ? '0' : '50%',
-                        right: idx > 8 ? '0' : 'auto',
-                        transform: idx > 8 || idx < 3 ? 'none' : 'translateX(-50%)',
-                        zIndex: 9999,
-                        width: '310px',
-                        background: '#0f172a',
-                        border: '1.5px solid var(--accent-cyan)',
-                        boxShadow: '0 20px 30px -5px rgba(0, 0, 0, 0.8), 0 0 20px rgba(6, 182, 212, 0.2)',
-                        borderRadius: '0.75rem',
-                        padding: '1rem',
-                        textAlign: 'left',
-                        pointerEvents: 'none'
+                        gridColumn: `${b.startMonth + 1} / span ${spanCols}`,
+                        gridRow: `${(b.rowIndex || 0) + 1}`,
+                        background: b.colorScheme.bg,
+                        border: `1px solid ${b.colorScheme.border}`,
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '0.3rem 0.5rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '0.35rem',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        color: b.colorScheme.text,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
                       }}
+                      title={`Dictamen: ${b.cert.title} | Cobertura: ${formatDateTime(b.cert.start_date)} - ${formatDateTime(b.cert.end_date)}`}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', borderBottom: '1px solid rgba(255,255,255,0.1)', pb: '0.4rem' }}>
-                        <span style={{ fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--accent-cyan)' }}>
-                          📅 {monthName.toUpperCase()} {selectedYear}
-                        </span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                          {monthCerts.length} Dictamen(es)
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', minWidth: 0 }}>
+                        <ShieldCheck size={13} style={{ flexShrink: 0 }} />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {spanCols <= 1 ? shortTitle : b.cert.title}
                         </span>
                       </div>
-
-                      {monthCerts.length === 0 ? (
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                          {status === 'pending' ? '⚠️ Período sin certificar.' : 'Período futuro.'}
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                          {monthCerts.map((c, cIdx) => {
-                            const cColor = getCertColor(c);
-                            return (
-                              <div
-                                key={c.id || cIdx}
-                                style={{
-                                  background: 'rgba(30, 41, 59, 0.6)',
-                                  borderLeft: `3px solid ${cColor.border}`,
-                                  padding: '0.5rem 0.6rem',
-                                  borderRadius: '0.4rem'
-                                }}
-                              >
-                                <div style={{ fontWeight: 'bold', fontSize: '0.8rem', color: cColor.text, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                                  <ShieldCheck size={13} />
-                                  {c.title}
-                                </div>
-                                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                                  • Cobertura: <strong style={{ color: '#fff' }}>{formatDateTime(c.start_date)}</strong> ➔ <strong style={{ color: '#fff' }}>{formatDateTime(c.end_date, c.created_at || c.issue_date)}</strong>
-                                </div>
-                                {c.cpa_name && (
-                                  <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
-                                    • CPA: {c.cpa_name}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
+                      {b.cert.cpa_name && spanCols > 1 && (
+                        <span style={{ fontSize: '0.68rem', opacity: 0.85, flexShrink: 0 }}>
+                          {b.cert.cpa_name.split(' ')[0]}
+                        </span>
                       )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      </div>
+            )}
 
-      {/* Certifications Table */}
-      <div className="glass-card" style={{ padding: '1.75rem', borderRadius: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <FileText size={20} style={{ color: 'var(--accent-cyan)' }} />
-            Registro de Certificaciones Contables
-          </h3>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Total: {certData.certifications.length} registro(s)
-          </span>
-        </div>
+            {/* Months Row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '0.45rem', position: 'relative', zIndex: 25 }}>
+              {months.map((monthName, idx) => {
+                const monthCerts = getCertsForMonth(idx);
+                const status = getMonthCoverageStatus(idx);
 
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
-            Cargando certificaciones contables...
+                let bgColor = 'rgba(255, 255, 255, 0.03)';
+                let borderColor = 'var(--border-subtle)';
+                let textColor = 'var(--text-muted)';
+
+                if (status === 'certified') {
+                  bgColor = 'rgba(16, 185, 129, 0.12)';
+                  borderColor = 'rgba(16, 185, 129, 0.35)';
+                  textColor = '#34D399';
+                } else if (status === 'pending') {
+                  bgColor = 'rgba(245, 158, 11, 0.12)';
+                  borderColor = 'rgba(245, 158, 11, 0.35)';
+                  textColor = '#FBBF24';
+                }
+
+                return (
+                  <div
+                    key={monthName}
+                    style={{
+                      background: bgColor,
+                      border: borderColor,
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.65rem 0.35rem',
+                      textAlign: 'center',
+                      transition: 'all 150ms ease',
+                      cursor: 'pointer',
+                      position: 'relative'
+                    }}
+                    onMouseEnter={() => setHoveredMonth(idx)}
+                    onMouseLeave={() => setHoveredMonth(null)}
+                    onClick={() => {
+                      if (status === 'pending') {
+                        const startD = `${selectedYear}-${String(idx + 1).padStart(2, '0')}-01`;
+                        const endD = new Date(selectedYear, idx + 1, 0).toISOString().split('T')[0];
+                        setFormData((prev) => ({
+                          ...prev,
+                          title: `Certificación ${monthName} ${selectedYear}`,
+                          start_date: startD,
+                          end_date: endD
+                        }));
+                        setShowModal(true);
+                      }
+                    }}
+                  >
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: textColor }}>{monthName}</div>
+                    <div style={{ fontSize: '0.68rem', marginTop: '0.2rem', color: textColor }}>
+                      {status === 'certified' ? '✓ Auditado' : status === 'pending' ? '⚠️ Sin cert.' : '-'}
+                    </div>
+
+                    {/* Hover Popover */}
+                    <AnimatePresence>
+                      {hoveredMonth === idx && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -4, scale: 0.96 }}
+                          style={{
+                            position: 'absolute',
+                            bottom: 'calc(100% + 8px)',
+                            left: idx > 8 ? 'auto' : idx < 3 ? '0' : '50%',
+                            right: idx > 8 ? '0' : 'auto',
+                            transform: idx > 8 || idx < 3 ? 'none' : 'translateX(-50%)',
+                            zIndex: 9999,
+                            width: '280px',
+                            background: '#0D131F',
+                            border: '1px solid var(--brand-indigo-border)',
+                            boxShadow: 'var(--shadow-lg)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '0.85rem',
+                            textAlign: 'left',
+                            pointerEvents: 'none'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.35rem' }}>
+                            <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--brand-indigo-light)' }}>
+                              📅 {monthName.toUpperCase()} {selectedYear}
+                            </span>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                              {monthCerts.length} Cert.
+                            </span>
+                          </div>
+
+                          {monthCerts.length === 0 ? (
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                              {status === 'pending' ? '⚠️ Período sin certificar.' : 'Período futuro.'}
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                              {monthCerts.map((c, cIdx) => (
+                                <div
+                                  key={c.id || cIdx}
+                                  style={{
+                                    background: 'var(--bg-elevated)',
+                                    borderLeft: '3px solid var(--accent-emerald)',
+                                    padding: '0.4rem 0.55rem',
+                                    borderRadius: 'var(--radius-sm)'
+                                  }}
+                                >
+                                  <div style={{ fontWeight: 700, fontSize: '0.78rem', color: '#34D399' }}>
+                                    {c.title}
+                                  </div>
+                                  <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }} className="font-mono">
+                                    {formatDateTime(c.start_date)} ➔ {formatDateTime(c.end_date)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        ) : certData.certifications.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '3.5rem 1rem', border: '2px dashed var(--border-color)', borderRadius: '0.75rem' }}>
-            <UploadCloud size={48} style={{ color: 'var(--text-secondary)', marginBottom: '1rem', opacity: 0.7 }} />
-            <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem' }}>No hay certificaciones registradas</h4>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', maxWidth: '480px', margin: '0 auto 1.5rem auto' }}>
-              Registrá tus certificaciones contables para mantener al día el historial de auditoría e impositivo.
-            </p>
-            <button onClick={openNewCertificationModal} className="btn-primary">
-              + Cargar Primer Certificado
-            </button>
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="data-table">
+
+          {/* Certifications Dense Table */}
+          <div className="sticky-table-container">
+            <table className="table-ledger">
               <thead>
                 <tr>
-                  <th>Título / Objeto</th>
+                  <th>Título / Objeto del Dictamen</th>
                   <th>Período Cubierto</th>
-                  <th>Emisor / Contador</th>
+                  <th>Contador / Matrícula</th>
                   <th>Fecha Emisión</th>
-                  <th>Documento Adjunto</th>
-                  <th style={{ textAlign: 'right' }}>Acciones</th>
+                  <th>Documento PDF</th>
+                  <th style={{ textAlign: 'right', width: '90px' }}>Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {certData.certifications.map((cert) => (
-                  <tr key={cert.id}>
-                    <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                      {cert.title}
-                      {cert.notes && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400, marginTop: '0.15rem' }}>
-                          {cert.notes}
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      <span className="badge badge-blue">
-                        {formatDateTime(cert.start_date)} al {formatDateTime(cert.end_date)}
-                      </span>
-                    </td>
-                    <td>{cert.cpa_name || <span style={{ color: 'var(--text-secondary)' }}>-</span>}</td>
-                    <td>{formatDateTime(cert.issue_date, cert.created_at) || <span style={{ color: 'var(--text-secondary)' }}>-</span>}</td>
-                    <td>
-                      {cert.file_path ? (
-                        <a
-                          href={`${API_BASE}/certifications/download/${cert.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ color: 'var(--accent-cyan)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', textDecoration: 'none', fontWeight: 500 }}
-                        >
-                          <Download size={14} /> Descargar PDF
-                        </a>
-                      ) : (
-                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Sin archivo</span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        onClick={() => openDeleteConfirm(cert.id, cert.title)}
-                        style={{
-                          background: 'rgba(239, 68, 68, 0.15)',
-                          border: '1px solid rgba(239, 68, 68, 0.3)',
-                          color: '#f87171',
-                          padding: '0.4rem 0.6rem',
-                          borderRadius: '0.4rem',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s'
-                        }}
-                        title="Eliminar registro"
-                      >
-                        <Trash2 size={15} />
+                {certData.certifications.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: '3.5rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <UploadCloud size={40} style={{ margin: '0 auto 0.75rem', opacity: 0.6, color: 'var(--brand-indigo-light)' }} />
+                      <h4 style={{ fontSize: '1.1rem', color: '#F8FAFC', margin: '0 0 0.25rem' }}>No hay certificaciones contables registradas</h4>
+                      <p style={{ fontSize: '0.85rem', margin: '0 0 1.25rem' }}>Subí tus dictámenes contables en PDF para auditar tus transacciones.</p>
+                      <button onClick={openNewCertificationModal} className="btn-primary">
+                        + Registrar Primer Certificado
                       </button>
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  certData.certifications.map((cert) => (
+                    <tr key={cert.id}>
+                      <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {cert.title}
+                        {cert.notes && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 400, marginTop: '0.15rem' }}>
+                            {cert.notes}
+                          </div>
+                        )}
+                      </td>
+                      <td className="font-mono">
+                        <span className="badge badge-indigo" style={{ fontSize: '0.72rem' }}>
+                          {formatDateTime(cert.start_date)} al {formatDateTime(cert.end_date)}
+                        </span>
+                      </td>
+                      <td>{cert.cpa_name || <span style={{ color: 'var(--text-muted)' }}>-</span>}</td>
+                      <td className="font-mono">{formatDateTime(cert.issue_date, cert.created_at) || <span style={{ color: 'var(--text-muted)' }}>-</span>}</td>
+                      <td>
+                        {cert.file_path ? (
+                          <a
+                            href={`${API_BASE}/certifications/download/${cert.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: 'var(--brand-indigo-light)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', textDecoration: 'none', fontWeight: 600, fontSize: '0.82rem' }}
+                          >
+                            <Download size={13} /> Descargar PDF
+                          </a>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Sin archivo</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          onClick={() => openDeleteConfirm(cert.id, cert.title)}
+                          style={{
+                            background: 'var(--accent-rose-subtle)',
+                            border: '1px solid var(--accent-rose-border)',
+                            color: 'var(--accent-rose-light)',
+                            padding: '0.35rem 0.55rem',
+                            borderRadius: 'var(--radius-sm)',
+                            cursor: 'pointer',
+                            transition: 'all 150ms ease'
+                          }}
+                          title="Eliminar certificación"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </>
+      )}
 
-      {/* Modal Nueva Certificación con Auto-Detección Inteligente y Carga Masiva */}
+      {/* Modal Nueva Certificación con Auto-Detección y Carga Masiva */}
       <AnimatePresence>
         {showModal && (
           <motion.div
@@ -1934,8 +1806,8 @@ const Calendar = () => {
             style={{
               position: 'fixed',
               top: 0, left: 0, right: 0, bottom: 0,
-              background: 'rgba(0, 0, 0, 0.8)',
-              backdropFilter: 'blur(10px)',
+              background: 'rgba(9, 13, 20, 0.85)',
+              backdropFilter: 'blur(8px)',
               zIndex: 2000,
               display: 'flex',
               alignItems: 'center',
@@ -1944,55 +1816,51 @@ const Calendar = () => {
             }}
           >
             <motion.div
-              initial={{ scale: 0.9, y: 20 }}
+              initial={{ scale: 0.94, y: 15 }}
               animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="glass-card"
+              exit={{ scale: 0.94, y: 15 }}
+              className="card-surface"
               style={{
                 width: '100%',
                 maxWidth: fileQueue.length > 1 ? '820px' : '620px',
                 maxHeight: '90vh',
                 overflowY: 'auto',
                 padding: '2rem',
-                borderRadius: '1.25rem',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-                boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
-                transition: 'max-width 0.3s ease'
+                border: '1px solid var(--border-strong)',
+                boxShadow: 'var(--shadow-lg)'
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.2rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <ShieldCheck size={24} style={{ color: 'var(--accent-cyan)' }} />
+                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <ShieldCheck size={22} color="var(--brand-indigo-light)" />
                     Registrar Certificaciones Contables
                   </h3>
-                  <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                    Podés seleccionar uno o varios archivos PDF para procesar de a lote.
+                  <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                    Podés seleccionar uno o varios archivos PDF para procesar por lote.
                   </p>
                 </div>
                 <button
                   onClick={() => setShowModal(false)}
-                  style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.3rem' }}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
                 >
                   <X size={20} />
                 </button>
               </div>
 
               {errorMessage && (
-                <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '0.75rem 1rem', borderRadius: '0.5rem', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                <div style={{ background: 'var(--accent-rose-subtle)', border: '1px solid var(--accent-rose-border)', color: 'var(--accent-rose-light)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', marginBottom: '1rem', fontSize: '0.82rem' }}>
                   {errorMessage}
                 </div>
               )}
 
               {successMessage && (
-                <div style={{ background: 'rgba(34, 197, 94, 0.15)', border: '1px solid rgba(34, 197, 94, 0.3)', color: '#4ade80', padding: '0.75rem 1rem', borderRadius: '0.5rem', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                <div style={{ background: 'var(--accent-emerald-subtle)', border: '1px solid var(--accent-emerald-border)', color: 'var(--accent-emerald-light)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', marginBottom: '1rem', fontSize: '0.82rem' }}>
                   {successMessage}
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
-                
-                {/* Drag & Drop / Multi-file Selector Zone */}
+              <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
                 <div
                   onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                   onDragLeave={() => setIsDragging(false)}
@@ -2003,14 +1871,10 @@ const Calendar = () => {
                       handleFilesAdd(e.dataTransfer.files);
                     }
                   }}
+                  className="upload-zone-refined"
                   style={{
-                    border: `2px dashed ${isDragging ? 'var(--accent-cyan)' : 'rgba(56, 189, 248, 0.4)'}`,
-                    borderRadius: '0.75rem',
-                    padding: fileQueue.length > 0 ? '0.85rem 1rem' : '1.5rem 1rem',
-                    background: isDragging ? 'rgba(56, 189, 248, 0.12)' : 'rgba(15, 23, 42, 0.6)',
-                    textAlign: 'center',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease'
+                    borderColor: isDragging ? 'var(--brand-indigo)' : 'var(--border-strong)',
+                    padding: fileQueue.length > 0 ? '1rem' : '1.75rem 1rem'
                   }}
                   onClick={() => document.getElementById('certFileInput').click()}
                 >
@@ -2024,201 +1888,108 @@ const Calendar = () => {
                       if (e.target.files) handleFilesAdd(e.target.files);
                     }}
                   />
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', color: 'var(--accent-cyan)' }}>
-                    <UploadCloud size={24} />
-                    <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#f8fafc' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: 'var(--brand-indigo-light)' }}>
+                    <UploadCloud size={22} />
+                    <span style={{ fontWeight: 600, fontSize: '0.88rem', color: '#F8FAFC' }}>
                       {fileQueue.length > 0 ? '+ Seleccionar o arrastrar más archivos' : 'Hacé clic o arrastrá uno o múltiples archivos PDF aquí'}
                     </span>
                   </div>
                   {fileQueue.length === 0 && (
-                    <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                       Soporta PDFs individuales o en lote. Se autodetectarán los períodos de cada archivo.
                     </p>
                   )}
                 </div>
 
-                {/* Case 1: Multiple or Single Files in Queue */}
                 {fileQueue.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '420px', overflowY: 'auto', paddingRight: '0.2rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                        Archivos para Registrar ({fileQueue.length}):
-                      </span>
-                    </div>
-
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', maxHeight: '380px', overflowY: 'auto' }}>
                     {fileQueue.map((item) => (
                       <div
                         key={item.id}
                         style={{
-                          background: 'rgba(15, 23, 42, 0.8)',
-                          border: '1px solid rgba(255, 255, 255, 0.1)',
-                          borderRadius: '0.75rem',
+                          background: '#0D131F',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 'var(--radius-md)',
                           padding: '1rem',
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: '0.75rem'
+                          gap: '0.65rem'
                         }}
                       >
-                        {/* Queue Item Header */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', overflow: 'hidden' }}>
-                            <FileText size={18} style={{ color: 'var(--accent-cyan)', flexShrink: 0 }} />
-                            <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '320px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', overflow: 'hidden' }}>
+                            <FileText size={16} color="var(--brand-indigo-light)" style={{ flexShrink: 0 }} />
+                            <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#F8FAFC', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '320px' }}>
                               {item.filename}
                             </span>
                           </div>
 
-
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             {item.parsing ? (
-
-                              <span
-                                className="badge"
-                                style={{
-                                  position: 'relative',
-                                  background: 'rgba(15, 23, 42, 0.95)',
-                                  color: '#38bdf8',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 600,
-                                  padding: '0.35rem 0.85rem',
-                                  borderRadius: '2rem',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '0.35rem',
-                                  overflow: 'hidden',
-                                  border: '1px solid rgba(56, 189, 248, 0.3)',
-                                  boxShadow: '0 0 12px rgba(56, 189, 248, 0.4)'
-                                }}
-                              >
-                                {/* 360° Sweeping Conic Border Halo */}
-                                <div
-                                  style={{
-                                    position: 'absolute',
-                                    inset: '-3px',
-                                    borderRadius: '2rem',
-                                    padding: '2.5px',
-                                    background: 'conic-gradient(from 0deg, #38bdf8 0%, #818cf8 35%, rgba(56, 189, 248, 0.15) 70%, transparent 100%)',
-                                    WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                                    WebkitMaskComposite: 'xor',
-                                    maskComposite: 'exclude',
-                                    animation: 'spinHalo 2s linear infinite',
-                                    pointerEvents: 'none'
-                                  }}
-                                />
-                                <Wand2 size={13} className="spin" style={{ zIndex: 1, position: 'relative' }} />
-                                <span style={{ zIndex: 1, position: 'relative' }}>Analizando PDF...</span>
+                              <span className="badge badge-indigo" style={{ fontSize: '0.72rem' }}>
+                                <RefreshCw size={11} className="spin" /> Analizando PDF...
                               </span>
-
-
                             ) : item.parsedSuccess ? (
-
-                              <span className="badge badge-green" style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem', borderRadius: '2rem', padding: '0.35rem 0.75rem' }}>
-                                <Sparkles size={13} /> Autocompletado
+                              <span className="badge badge-emerald" style={{ fontSize: '0.72rem' }}>
+                                <Sparkles size={11} /> Autocompletado
                               </span>
                             ) : (
-                              <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', fontSize: '0.75rem', borderRadius: '2rem', padding: '0.35rem 0.75rem' }}>
+                              <span className="badge badge-amber" style={{ fontSize: '0.72rem' }}>
                                 Verificar fechas
                               </span>
                             )}
 
-
                             <button
                               type="button"
                               onClick={() => handleRemoveQueueItem(item.id)}
-                              style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '0.3rem 0.5rem', borderRadius: '0.375rem', cursor: 'pointer' }}
-                              title="Quitar de la lista"
+                              style={{ background: 'var(--accent-rose-subtle)', border: '1px solid var(--accent-rose-border)', color: 'var(--accent-rose-light)', padding: '0.25rem 0.45rem', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
+                              title="Quitar"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={13} />
                             </button>
                           </div>
                         </div>
 
-                        {/* Fields per Queue Item */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.75rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.65rem' }}>
                           <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
                               Título / Descripción
                             </label>
                             <input
                               type="text"
                               value={item.title}
                               onChange={(e) => handleQueueItemChange(item.id, 'title', e.target.value)}
-                              style={{
-                                width: '100%', padding: '0.55rem 0.75rem', borderRadius: '0.4rem',
-                                background: 'rgba(30, 41, 59, 0.8)', border: '1px solid var(--border-color)',
-                                color: 'var(--text-primary)', fontSize: '0.85rem', boxSizing: 'border-box'
-                              }}
+                              className="input-field"
+                              style={{ padding: '0.45rem 0.65rem', fontSize: '0.82rem' }}
                             />
                           </div>
 
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
                             <div>
-                              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
                                 Fecha Inicio (Desde) *
                               </label>
                               <input
                                 type="date"
                                 value={item.start_date}
                                 onChange={(e) => handleQueueItemChange(item.id, 'start_date', e.target.value)}
-                                style={{
-                                  width: '100%', padding: '0.55rem 0.75rem', borderRadius: '0.4rem',
-                                  background: 'rgba(30, 41, 59, 0.8)', border: '1px solid var(--border-color)',
-                                  color: 'var(--text-primary)', fontSize: '0.85rem', boxSizing: 'border-box'
-                                }}
+                                className="input-field"
+                                style={{ padding: '0.45rem 0.65rem', fontSize: '0.82rem' }}
                                 required
                               />
                             </div>
 
                             <div>
-                              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
                                 Fecha Fin (Hasta) *
                               </label>
                               <input
                                 type="date"
                                 value={item.end_date}
                                 onChange={(e) => handleQueueItemChange(item.id, 'end_date', e.target.value)}
-                                style={{
-                                  width: '100%', padding: '0.55rem 0.75rem', borderRadius: '0.4rem',
-                                  background: 'rgba(30, 41, 59, 0.8)', border: '1px solid var(--border-color)',
-                                  color: 'var(--text-primary)', fontSize: '0.85rem', boxSizing: 'border-box'
-                                }}
+                                className="input-field"
+                                style={{ padding: '0.45rem 0.65rem', fontSize: '0.82rem' }}
                                 required
-                              />
-                            </div>
-                          </div>
-
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                            <div>
-                              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                                Contador Emisor / Matrícula
-                              </label>
-                              <input
-                                type="text"
-                                value={item.cpa_name}
-                                onChange={(e) => handleQueueItemChange(item.id, 'cpa_name', e.target.value)}
-                                placeholder="Ej: CPN Carlos Gómez (Mat. 1234)"
-                                style={{
-                                  width: '100%', padding: '0.55rem 0.75rem', borderRadius: '0.4rem',
-                                  background: 'rgba(30, 41, 59, 0.8)', border: '1px solid var(--border-color)',
-                                  color: 'var(--text-primary)', fontSize: '0.85rem', boxSizing: 'border-box'
-                                }}
-                              />
-                            </div>
-
-                            <div>
-                              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                                Observaciones / Notas
-                              </label>
-                              <input
-                                type="text"
-                                value={item.notes}
-                                onChange={(e) => handleQueueItemChange(item.id, 'notes', e.target.value)}
-                                placeholder="Notas aclaratorias..."
-                                style={{
-                                  width: '100%', padding: '0.55rem 0.75rem', borderRadius: '0.4rem',
-                                  background: 'rgba(30, 41, 59, 0.8)', border: '1px solid var(--border-color)',
-                                  color: 'var(--text-primary)', fontSize: '0.85rem', boxSizing: 'border-box'
-                                }}
                               />
                             </div>
                           </div>
@@ -2227,10 +1998,9 @@ const Calendar = () => {
                     ))}
                   </div>
                 ) : (
-                  /* Case 2: Manual Registration Form (When no files uploaded) */
                   <>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
                         Título / Descripción
                       </label>
                       <input
@@ -2238,18 +2008,14 @@ const Calendar = () => {
                         name="title"
                         value={formData.title}
                         onChange={handleInputChange}
-                        placeholder="Ej: Certificación Contable Anual 2023"
-                        style={{
-                          width: '100%', padding: '0.75rem', borderRadius: '0.5rem',
-                          background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)',
-                          color: 'var(--text-primary)', fontSize: '0.9rem', boxSizing: 'border-box'
-                        }}
+                        placeholder="Ej: Certificación Contable Anual 2024"
+                        className="input-field"
                       />
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
                           Fecha Inicio (Desde) *
                         </label>
                         <input
@@ -2257,17 +2023,13 @@ const Calendar = () => {
                           name="start_date"
                           value={formData.start_date}
                           onChange={handleInputChange}
-                          style={{
-                            width: '100%', padding: '0.75rem', borderRadius: '0.5rem',
-                            background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)',
-                            color: 'var(--text-primary)', fontSize: '0.9rem', boxSizing: 'border-box'
-                          }}
+                          className="input-field"
                           required
                         />
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
                           Fecha Fin (Hasta) *
                         </label>
                         <input
@@ -2275,19 +2037,15 @@ const Calendar = () => {
                           name="end_date"
                           value={formData.end_date}
                           onChange={handleInputChange}
-                          style={{
-                            width: '100%', padding: '0.75rem', borderRadius: '0.5rem',
-                            background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)',
-                            color: 'var(--text-primary)', fontSize: '0.9rem', boxSizing: 'border-box'
-                          }}
+                          className="input-field"
                           required
                         />
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
                           Fecha de Emisión
                         </label>
                         <input
@@ -2295,16 +2053,12 @@ const Calendar = () => {
                           name="issue_date"
                           value={formData.issue_date}
                           onChange={handleInputChange}
-                          style={{
-                            width: '100%', padding: '0.75rem', borderRadius: '0.5rem',
-                            background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)',
-                            color: 'var(--text-primary)', fontSize: '0.9rem', boxSizing: 'border-box'
-                          }}
+                          className="input-field"
                         />
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
                           Contador Emisor / Matrícula
                         </label>
                         <input
@@ -2313,17 +2067,13 @@ const Calendar = () => {
                           value={formData.cpa_name}
                           onChange={handleInputChange}
                           placeholder="Ej: CPN Carlos Gómez (Mat. 1234)"
-                          style={{
-                            width: '100%', padding: '0.75rem', borderRadius: '0.5rem',
-                            background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)',
-                            color: 'var(--text-primary)', fontSize: '0.9rem', boxSizing: 'border-box'
-                          }}
+                          className="input-field"
                         />
                       </div>
                     </div>
 
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
                         Observaciones / Notas
                       </label>
                       <textarea
@@ -2331,26 +2081,18 @@ const Calendar = () => {
                         value={formData.notes}
                         onChange={handleInputChange}
                         rows="2"
-                        placeholder="Notas internas o aclaraciones del dictamen..."
-                        style={{
-                          width: '100%', padding: '0.75rem', borderRadius: '0.5rem',
-                          background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)',
-                          color: 'var(--text-primary)', fontSize: '0.9rem', boxSizing: 'border-box'
-                        }}
+                        placeholder="Notas aclaratorias del dictamen..."
+                        className="input-field"
                       />
                     </div>
                   </>
                 )}
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
                   <button
                     type="button"
                     onClick={() => setShowModal(false)}
-                    style={{
-                      background: 'transparent', border: '1px solid var(--border-color)',
-                      color: 'var(--text-secondary)', padding: '0.75rem 1.25rem', borderRadius: '0.5rem',
-                      cursor: 'pointer', fontWeight: 600
-                    }}
+                    className="btn-outline"
                   >
                     Cancelar
                   </button>
@@ -2367,103 +2109,8 @@ const Calendar = () => {
           </motion.div>
         )}
       </AnimatePresence>
-      </>
-      )}
 
-      {/* Glassmorphism PDF OCR Loading Overlay */}
-      <AnimatePresence>
-        {parsingPdf && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed', inset: 0, zIndex: 1000,
-              background: 'rgba(15, 23, 42, 0.85)',
-              backdropFilter: 'blur(12px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: '1.5rem'
-            }}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              style={{
-                background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98))',
-                border: '1px solid rgba(56, 189, 248, 0.4)',
-                boxShadow: '0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(56, 189, 248, 0.2)',
-                borderRadius: '1.25rem', padding: '2.5rem', maxWidth: '460px', width: '100%',
-                textAlign: 'center', color: '#f8fafc'
-              }}
-            >
-              <div style={{ position: 'relative', width: '80px', height: '80px', margin: '0 auto 1.5rem' }}>
-                <div style={{
-                  position: 'absolute', inset: 0, borderRadius: '50%',
-                  border: '4px solid rgba(56, 189, 248, 0.15)',
-                  borderTopColor: '#38bdf8',
-                  animation: 'spin 1s linear infinite'
-                }} />
-                <div style={{
-                  position: 'absolute', inset: '10px', borderRadius: '50%',
-                  border: '4px solid rgba(129, 140, 248, 0.15)',
-                  borderBottomColor: '#818cf8',
-                  animation: 'spin 1.5s linear infinite reverse'
-                }} />
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  height: '100%', fontSize: '2rem'
-                }}>
-                  📄
-                </div>
-              </div>
-
-              <h3 style={{ fontSize: '1.35rem', fontWeight: 700, margin: '0 0 0.75rem', background: 'linear-gradient(to right, #38bdf8, #818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-                Escaneando Documento PDF...
-              </h3>
-
-              <p style={{ fontSize: '0.92rem', color: '#94a3b8', lineHeight: 1.5, margin: '0 0 0.75rem' }}>
-                El motor de análisis está procesando las firmas, sellos y tablas del documento.
-              </p>
-
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
-                background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)',
-                padding: '0.4rem 0.85rem', borderRadius: '2rem', fontSize: '0.85rem',
-                color: '#38bdf8', fontWeight: 600, marginBottom: '1.5rem'
-              }}>
-                ⏱️ Tiempo estimado: ~5 a 15 segundos
-              </div>
-
-
-              <div style={{
-                height: '6px', width: '100%', background: 'rgba(51, 65, 85, 0.6)',
-                borderRadius: '3px', overflow: 'hidden', position: 'relative'
-              }}>
-                <div style={{
-                  position: 'absolute', height: '100%', width: '40%',
-                  background: 'linear-gradient(90deg, #38bdf8, #818cf8)',
-                  borderRadius: '3px', animation: 'progressPulse 1.8s ease-in-out infinite'
-                }} />
-              </div>
-
-              <style>{`
-                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-                @keyframes progressPulse { 0% { left: -40%; } 100% { left: 100%; } }
-                @keyframes spinHalo { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-                @keyframes haloPulse {
-                  0% { box-shadow: 0 0 6px rgba(56, 189, 248, 0.4), inset 0 0 4px rgba(56, 189, 248, 0.2); border-color: rgba(56, 189, 248, 0.5); }
-                  50% { box-shadow: 0 0 16px rgba(56, 189, 248, 0.9), inset 0 0 8px rgba(56, 189, 248, 0.5); border-color: #38bdf8; }
-                  100% { box-shadow: 0 0 6px rgba(56, 189, 248, 0.4), inset 0 0 4px rgba(56, 189, 248, 0.2); border-color: rgba(56, 189, 248, 0.5); }
-                }
-              `}</style>
-
-
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      {/* Modal Confirmación de Eliminación In-Page */}
+      {/* Delete Confirmation Modal */}
       <AnimatePresence>
         {deleteConfirm.show && (
           <motion.div
@@ -2473,7 +2120,7 @@ const Calendar = () => {
             style={{
               position: 'fixed',
               top: 0, left: 0, right: 0, bottom: 0,
-              background: 'rgba(0, 0, 0, 0.75)',
+              background: 'rgba(9, 13, 20, 0.85)',
               backdropFilter: 'blur(8px)',
               zIndex: 3000,
               display: 'flex',
@@ -2483,93 +2130,73 @@ const Calendar = () => {
             }}
           >
             <motion.div
-              initial={{ scale: 0.9, y: 15, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.9, y: 15, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="glass-card"
+              initial={{ scale: 0.94, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.94, y: 15 }}
+              className="card-surface"
               style={{
                 width: '100%',
                 maxWidth: '440px',
                 padding: '1.75rem',
-                borderRadius: '1.25rem',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 25px rgba(239, 68, 68, 0.15)',
-                background: 'linear-gradient(145deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98))',
-                color: '#f8fafc'
+                border: '1px solid var(--accent-rose-border)',
+                boxShadow: 'var(--shadow-lg)'
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.85rem', marginBottom: '1.25rem' }}>
                 <div style={{
-                  background: 'rgba(239, 68, 68, 0.15)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                  borderRadius: '0.75rem',
-                  padding: '0.75rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#f87171',
+                  background: 'var(--accent-rose-subtle)',
+                  border: '1px solid var(--accent-rose-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0.65rem',
+                  color: 'var(--accent-rose-light)',
                   flexShrink: 0
                 }}>
-                  <Trash2 size={24} />
+                  <Trash2 size={22} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: '#f8fafc' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#F8FAFC' }}>
                     ¿Eliminar certificación?
                   </h3>
-                  <p style={{ margin: '0.4rem 0 0 0', fontSize: '0.88rem', color: '#94a3b8', lineHeight: 1.4 }}>
-                    ¿Estás seguro de eliminar la certificación <strong style={{ color: '#f8fafc' }}>"{deleteConfirm.title}"</strong>? Esta acción no se puede deshacer.
+                  <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                    ¿Confirmás la eliminación de <strong style={{ color: '#F8FAFC' }}>"{deleteConfirm.title}"</strong>?
                   </p>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', marginTop: '1.25rem' }}>
                 <button
                   type="button"
                   disabled={deleteConfirm.deleting}
                   onClick={() => setDeleteConfirm({ show: false, id: null, title: '', deleting: false })}
-                  className="btn-primary"
-                  style={{
-                    background: 'rgba(51, 65, 85, 0.6)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    color: '#cbd5e1',
-                    padding: '0.55rem 1.1rem',
-                    fontSize: '0.88rem'
-                  }}
+                  className="btn-outline"
                 >
                   Cancelar
                 </button>
-
                 <button
                   type="button"
                   disabled={deleteConfirm.deleting}
                   onClick={handleDeleteConfirm}
                   style={{
-                    background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                    background: 'linear-gradient(135deg, #EF4444, #DC2626)',
                     border: 'none',
-                    color: '#ffffff',
-                    padding: '0.55rem 1.25rem',
-                    borderRadius: '0.5rem',
+                    color: '#FFFFFF',
+                    padding: '0.55rem 1.15rem',
+                    borderRadius: 'var(--radius-md)',
                     fontWeight: 600,
-                    fontSize: '0.88rem',
+                    fontSize: '0.85rem',
                     cursor: deleteConfirm.deleting ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '0.5rem',
-                    boxShadow: '0 4px 14px rgba(239, 68, 68, 0.4)',
-                    opacity: deleteConfirm.deleting ? 0.7 : 1,
-                    transition: 'all 0.2s'
+                    gap: '0.45rem'
                   }}
                 >
                   {deleteConfirm.deleting ? (
                     <>
-                      <RefreshCw size={15} className="spin" />
-                      Eliminando...
+                      <RefreshCw size={14} className="spin" /> Eliminando...
                     </>
                   ) : (
                     <>
-                      <Trash2 size={15} />
-                      Sí, Eliminar
+                      <Trash2 size={14} /> Sí, Eliminar
                     </>
                   )}
                 </button>
@@ -2579,7 +2206,7 @@ const Calendar = () => {
         )}
       </AnimatePresence>
 
-      {/* Modal Resolutor Guiado de Advertencias */}
+      {/* Guided Resolution Modal */}
       <AnimatePresence>
         {showResolverModal && selectedWarning && (
           <motion.div
@@ -2589,7 +2216,7 @@ const Calendar = () => {
             style={{
               position: 'fixed',
               top: 0, left: 0, right: 0, bottom: 0,
-              background: 'rgba(0, 0, 0, 0.75)',
+              background: 'rgba(9, 13, 20, 0.85)',
               backdropFilter: 'blur(8px)',
               zIndex: 2500,
               display: 'flex',
@@ -2599,100 +2226,84 @@ const Calendar = () => {
             }}
           >
             <motion.div
-              initial={{ scale: 0.9, y: 15, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.9, y: 15, opacity: 0 }}
-              className="glass-card"
+              initial={{ scale: 0.94, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.94, y: 15 }}
+              className="card-surface"
               style={{
                 width: '100%',
                 maxWidth: '560px',
-                padding: '2rem',
-                borderRadius: '1.25rem',
-                border: '1px solid rgba(245, 158, 11, 0.3)',
-                background: 'linear-gradient(145deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.99))',
-                color: '#f8fafc',
-                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 30px rgba(245, 158, 11, 0.15)'
+                padding: '1.75rem',
+                border: '1px solid var(--accent-amber-border)',
+                boxShadow: 'var(--shadow-lg)'
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.6rem', color: '#fbbf24' }}>
-                  <Wand2 size={22} /> Resolutor Guiado de Advertencias
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#FBBF24' }}>
+                  <Wand2 size={20} /> Resolutor Guiado de Advertencias
                 </h3>
                 <button
                   onClick={() => setShowResolverModal(false)}
-                  style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
                 >
-                  <X size={20} />
+                  <X size={18} />
                 </button>
               </div>
 
-              {/* Wizard Steps Progress Header */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem', background: 'rgba(15, 23, 42, 0.6)', padding: '0.6rem 1rem', borderRadius: '0.6rem', border: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: resolverStep === 1 ? '#38bdf8' : '#4ade80', fontWeight: '600', fontSize: '0.82rem' }}>
-                  <span style={{ width: '22px', height: '22px', borderRadius: '50%', background: resolverStep === 1 ? '#38bdf8' : '#22c55e', color: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 'bold' }}>1</span>
+              {/* Steps Progress */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1.25rem', background: '#0D131F', padding: '0.5rem 0.85rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: resolverStep === 1 ? 'var(--brand-indigo-light)' : '#34D399', fontWeight: 600, fontSize: '0.78rem' }}>
+                  <span style={{ width: '18px', height: '18px', borderRadius: '50%', background: resolverStep === 1 ? 'var(--brand-indigo)' : '#10B981', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem' }}>1</span>
                   Diagnóstico
                 </div>
-                <ChevronRight size={14} color="#64748b" />
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: resolverStep === 2 ? '#38bdf8' : resolverStep === 3 ? '#4ade80' : '#64748b', fontWeight: '600', fontSize: '0.82rem' }}>
-                  <span style={{ width: '22px', height: '22px', borderRadius: '50%', background: resolverStep === 2 ? '#38bdf8' : resolverStep === 3 ? '#22c55e' : '#334155', color: resolverStep >= 2 ? '#0f172a' : '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 'bold' }}>2</span>
-                  Completar Datos
+                <ChevronRight size={13} color="var(--text-muted)" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: resolverStep === 2 ? 'var(--brand-indigo-light)' : resolverStep === 3 ? '#34D399' : 'var(--text-muted)', fontWeight: 600, fontSize: '0.78rem' }}>
+                  <span style={{ width: '18px', height: '18px', borderRadius: '50%', background: resolverStep === 2 ? 'var(--brand-indigo)' : resolverStep === 3 ? '#10B981' : '#334155', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem' }}>2</span>
+                  Datos
                 </div>
-                <ChevronRight size={14} color="#64748b" />
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: resolverStep === 3 ? '#4ade80' : '#64748b', fontWeight: '600', fontSize: '0.82rem' }}>
-                  <span style={{ width: '22px', height: '22px', borderRadius: '50%', background: resolverStep === 3 ? '#22c55e' : '#334155', color: resolverStep === 3 ? '#0f172a' : '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 'bold' }}>3</span>
-                  Confirmación
+                <ChevronRight size={13} color="var(--text-muted)" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: resolverStep === 3 ? '#34D399' : 'var(--text-muted)', fontWeight: 600, fontSize: '0.78rem' }}>
+                  <span style={{ width: '18px', height: '18px', borderRadius: '50%', background: resolverStep === 3 ? '#10B981' : '#334155', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem' }}>3</span>
+                  Confirmar
                 </div>
               </div>
 
               {resolverError && (
-                <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid #ef4444', borderRadius: '0.6rem', padding: '0.75rem', marginBottom: '1rem', color: '#fca5a5', fontSize: '0.85rem' }}>
+                <div style={{ background: 'var(--accent-rose-subtle)', border: '1px solid var(--accent-rose-border)', borderRadius: 'var(--radius-sm)', padding: '0.65rem', marginBottom: '1rem', color: 'var(--accent-rose-light)', fontSize: '0.82rem' }}>
                   {resolverError}
                 </div>
               )}
 
               {resolverSuccess && (
-                <div style={{ background: 'rgba(34, 197, 94, 0.12)', border: '1px solid #22c55e', borderRadius: '0.6rem', padding: '0.75rem', marginBottom: '1rem', color: '#4ade80', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <CheckCircle2 size={18} /> {resolverSuccess}
+                <div style={{ background: 'var(--accent-emerald-subtle)', border: '1px solid var(--accent-emerald-border)', borderRadius: 'var(--radius-sm)', padding: '0.65rem', marginBottom: '1rem', color: 'var(--accent-emerald-light)', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <CheckCircle2 size={16} /> {resolverSuccess}
                 </div>
               )}
 
               <form onSubmit={handleResolverSubmit}>
                 {resolverStep === 1 && (
                   <div>
-                    <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: '0.75rem', padding: '1rem', marginBottom: '1.25rem' }}>
-                      <h4 style={{ margin: '0 0 0.4rem 0', fontSize: '0.95rem', color: '#fef08a' }}>Detalle de la Operación Afectada</h4>
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: '#cbd5e1', lineHeight: '1.4' }}>
+                    <div style={{ background: 'var(--accent-amber-subtle)', border: '1px solid var(--accent-amber-border)', borderRadius: 'var(--radius-md)', padding: '0.85rem', marginBottom: '1.15rem' }}>
+                      <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '0.88rem', color: '#FEF08A' }}>Detalle de la Operación Afectada</h4>
+                      <p style={{ margin: 0, fontSize: '0.82rem', color: '#CBD5E1', lineHeight: '1.4' }}>
                         <strong>Exchange:</strong> {resolverData.exchange}<br />
                         <strong>Fecha de la Venta:</strong> {resolverData.date}<br />
                         <strong>Cripto & Monto Faltante:</strong> {resolverData.missing} {resolverData.crypto}
                       </p>
                     </div>
 
-                    <div style={{ display: 'grid', gap: '0.85rem', marginBottom: '1.5rem' }}>
-                      {/* Vía 1: Dropzone directo e in-situ */}
-                      <div style={{ background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(56, 189, 248, 0.35)', borderRadius: '0.75rem', padding: '1rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                          <div style={{ background: 'rgba(56, 189, 248, 0.15)', padding: '0.4rem', borderRadius: '0.4rem', color: '#38bdf8', flexShrink: 0 }}>
-                            <UploadCloud size={22} />
-                          </div>
-                          <div>
-                            <strong style={{ fontSize: '0.9rem', color: '#f8fafc', display: 'block' }}>Vía 1: Cargar Excel / CSV de {resolverData.exchange} directamente aquí</strong>
-                            <span style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: '1.3', display: 'block', marginTop: '0.1rem' }}>
-                              Subí la planilla de compras o depósitos para resolver esta advertencia al instante.
-                            </span>
-                          </div>
+                    <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                      {/* Vía 1: In-situ dropzone */}
+                      <div style={{ background: '#0D131F', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.85rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.65rem' }}>
+                          <UploadCloud size={18} color="var(--brand-indigo-light)" />
+                          <strong style={{ fontSize: '0.85rem', color: '#F8FAFC' }}>
+                            Vía 1: Cargar Excel / CSV de {resolverData.exchange}
+                          </strong>
                         </div>
-
                         <div
-                          style={{
-                            border: '2px dashed #0284c7',
-                            borderRadius: '0.6rem',
-                            padding: '1.25rem 1rem',
-                            textAlign: 'center',
-                            background: 'rgba(2, 132, 199, 0.06)',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s'
-                          }}
+                          className="upload-zone-refined"
+                          style={{ padding: '0.85rem' }}
                           onClick={() => document.getElementById('resolverFileInputInSitu').click()}
                           onDragOver={(e) => e.preventDefault()}
                           onDrop={(e) => {
@@ -2709,46 +2320,38 @@ const Calendar = () => {
                             hidden
                             onChange={(e) => handleInModalUpload(e.target.files)}
                           />
-                          <UploadCloud size={32} color="#38bdf8" style={{ marginBottom: '0.4rem' }} />
-                          <div style={{ fontSize: '0.88rem', color: '#f8fafc', fontWeight: 'bold' }}>
-                            Arrastrá o hacé clic para seleccionar tu Excel / CSV
-                          </div>
-                          <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.2rem' }}>
-                            Soporta .xlsx, .csv (Binance, Bitso, Fiwind, Ripio, etc.)
+                          <div style={{ fontSize: '0.82rem', color: '#F8FAFC', fontWeight: 600 }}>
+                            Arrastrá o hacé clic para subir tu planilla
                           </div>
                         </div>
-
                         {inModalUploading && (
-                          <div style={{ marginTop: '0.75rem', textAlign: 'center', color: '#38bdf8', fontSize: '0.85rem', fontWeight: 'bold' }}>
-                            ⏳ Procesando e importando transacciones al sistema...
+                          <div style={{ marginTop: '0.5rem', textAlign: 'center', color: 'var(--brand-indigo-light)', fontSize: '0.8rem' }}>
+                            ⏳ Procesando transacciones...
                           </div>
                         )}
-
                         {inModalUploadMsg && (
-                          <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: inModalUploadMsg.type === 'success' ? '#4ade80' : '#fca5a5', textAlign: 'center', fontWeight: 'bold', background: 'rgba(0,0,0,0.3)', padding: '0.5rem', borderRadius: '0.4rem' }}>
+                          <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: inModalUploadMsg.type === 'success' ? '#34D399' : '#FB7185', textAlign: 'center' }}>
                             {inModalUploadMsg.text}
                           </div>
                         )}
                       </div>
 
-                      {/* Vía 2: Declarar Saldo Inicial */}
-                      <div style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid var(--border-color)', borderRadius: '0.65rem', padding: '0.85rem', display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-                        <div style={{ background: 'rgba(245, 158, 11, 0.15)', padding: '0.4rem', borderRadius: '0.4rem', color: '#fbbf24', flexShrink: 0 }}>
-                          <Wand2 size={20} />
-                        </div>
+                      {/* Vía 2 */}
+                      <div style={{ background: '#0D131F', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.85rem', display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                        <Wand2 size={18} color="var(--accent-amber-light)" style={{ flexShrink: 0, marginTop: '2px' }} />
                         <div>
-                          <strong style={{ fontSize: '0.88rem', color: '#f8fafc', display: 'block' }}>Vía 2: Declarar Saldo Inicial / Ajuste Manual</strong>
-                          <span style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: '1.3', display: 'block', marginTop: '0.2rem' }}>
-                            Si son compras P2P informales, saldo de años anteriores o regalos, hacé clic en Continuar para declarar la fecha estimada y costo.
+                          <strong style={{ fontSize: '0.85rem', color: '#F8FAFC', display: 'block' }}>Vía 2: Declarar Saldo Inicial / Ajuste Manual</strong>
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.15rem', display: 'block' }}>
+                            Compras P2P informales, saldo de años anteriores o aportes de capital.
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
-                      <button type="button" onClick={() => setShowResolverModal(false)} className="btn-primary" style={{ background: '#334155', fontSize: '0.82rem' }}>Cerrar</button>
-                      <button type="button" onClick={() => setResolverStep(2)} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 'bold', background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}>
-                        Ajuste Manual <ArrowRight size={16} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.65rem' }}>
+                      <button type="button" onClick={() => setShowResolverModal(false)} className="btn-outline">Cerrar</button>
+                      <button type="button" onClick={() => setResolverStep(2)} className="btn-primary">
+                        Ajuste Manual <ArrowRight size={14} />
                       </button>
                     </div>
                   </div>
@@ -2756,13 +2359,15 @@ const Calendar = () => {
 
                 {resolverStep === 2 && (
                   <div>
-                    <div style={{ display: 'grid', gap: '1rem', marginBottom: '1.5rem' }}>
+                    <div style={{ display: 'grid', gap: '0.85rem', marginBottom: '1.25rem' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.82rem', color: '#cbd5e1', marginBottom: '0.35rem', fontWeight: 600 }}>Origen / Tipo de Adquisición</label>
+                        <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.25rem', fontWeight: 600 }}>
+                          Origen / Tipo de Adquisición
+                        </label>
                         <select
                           value={resolverData.origin_type}
                           onChange={(e) => setResolverData(prev => ({ ...prev, origin_type: e.target.value }))}
-                          style={{ width: '100%', padding: '0.6rem 0.8rem', background: '#0f172a', border: '1px solid var(--border-color)', borderRadius: '0.5rem', color: '#fff', fontSize: '0.9rem' }}
+                          className="input-field"
                         >
                           <option value="Capital Inicial / Años Anteriores">Capital Inicial / Años Anteriores</option>
                           <option value="Compra P2P Binance / Sin Respaldo">Compra P2P Binance / Sin Respaldo</option>
@@ -2771,34 +2376,38 @@ const Calendar = () => {
                         </select>
                       </div>
 
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
                         <div>
-                          <label style={{ display: 'block', fontSize: '0.82rem', color: '#cbd5e1', marginBottom: '0.35rem', fontWeight: 600 }}>Fecha de Adquisición</label>
+                          <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.25rem', fontWeight: 600 }}>
+                            Fecha de Adquisición
+                          </label>
                           <input
                             type="date"
                             value={resolverData.date ? resolverData.date.split(' ')[0] : ''}
                             onChange={(e) => setResolverData(prev => ({ ...prev, date: e.target.value }))}
-                            style={{ width: '100%', padding: '0.6rem 0.8rem', background: '#0f172a', border: '1px solid var(--border-color)', borderRadius: '0.5rem', color: '#fff', fontSize: '0.9rem' }}
+                            className="input-field"
                           />
                         </div>
 
                         <div>
-                          <label style={{ display: 'block', fontSize: '0.82rem', color: '#cbd5e1', marginBottom: '0.35rem', fontWeight: 600 }}>Cantidad ({resolverData.crypto})</label>
+                          <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.25rem', fontWeight: 600 }}>
+                            Cantidad ({resolverData.crypto})
+                          </label>
                           <input
                             type="number"
                             step="any"
                             value={resolverData.missing}
                             onChange={(e) => setResolverData(prev => ({ ...prev, missing: parseFloat(e.target.value) || 0 }))}
-                            style={{ width: '100%', padding: '0.6rem 0.8rem', background: '#0f172a', border: '1px solid var(--border-color)', borderRadius: '0.5rem', color: '#fff', fontSize: '0.9rem' }}
+                            className="input-field"
                           />
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
-                      <button type="button" onClick={() => setResolverStep(1)} className="btn-primary" style={{ background: '#334155' }}>Atrás</button>
-                      <button type="button" onClick={() => setResolverStep(3)} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        Revisar <ArrowRight size={16} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.65rem' }}>
+                      <button type="button" onClick={() => setResolverStep(1)} className="btn-outline">Atrás</button>
+                      <button type="button" onClick={() => setResolverStep(3)} className="btn-primary">
+                        Revisar <ArrowRight size={14} />
                       </button>
                     </div>
                   </div>
@@ -2806,9 +2415,9 @@ const Calendar = () => {
 
                 {resolverStep === 3 && (
                   <div>
-                    <div style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '0.75rem', padding: '1rem', marginBottom: '1.5rem' }}>
-                      <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.95rem', color: '#38bdf8' }}>Resumen del Ajuste a Registrar</h4>
-                      <div style={{ fontSize: '0.85rem', color: '#cbd5e1', lineHeight: '1.5' }}>
+                    <div style={{ background: 'var(--brand-indigo-subtle)', border: '1px solid var(--brand-indigo-border)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1.25rem' }}>
+                      <h4 style={{ margin: '0 0 0.4rem 0', fontSize: '0.9rem', color: 'var(--brand-indigo-light)' }}>Resumen del Ajuste</h4>
+                      <div style={{ fontSize: '0.82rem', color: '#CBD5E1', lineHeight: '1.5' }}>
                         <strong>Tipo:</strong> Compra / Ingreso de Ajuste FIFO<br />
                         <strong>Origen:</strong> {resolverData.origin_type}<br />
                         <strong>Criptomonedas:</strong> {resolverData.missing} {resolverData.crypto}<br />
@@ -2816,21 +2425,21 @@ const Calendar = () => {
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
-                      <button type="button" onClick={() => setResolverStep(2)} className="btn-primary" style={{ background: '#334155' }} disabled={resolverSubmitting}>Atrás</button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.65rem' }}>
+                      <button type="button" onClick={() => setResolverStep(2)} className="btn-outline" disabled={resolverSubmitting}>Atrás</button>
                       <button
                         type="submit"
                         className="btn-primary"
-                        style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        style={{ background: 'linear-gradient(135deg, #10B981, #059669)' }}
                         disabled={resolverSubmitting}
                       >
                         {resolverSubmitting ? (
                           <>
-                            <RefreshCw size={16} className="spin" /> Guardando...
+                            <RefreshCw size={14} className="spin" /> Guardando...
                           </>
                         ) : (
                           <>
-                            <Check size={16} /> Confirmar y Guardar Ajuste
+                            <Check size={14} /> Confirmar y Guardar Ajuste
                           </>
                         )}
                       </button>
@@ -2843,7 +2452,7 @@ const Calendar = () => {
         )}
       </AnimatePresence>
 
-      {/* Modal Ponete al Día - Checklist Interactivo por Exchange */}
+      {/* Modal Ponete al Día - Checklist Interactivo */}
       <AnimatePresence>
         {showPonteAlDiaModal && (
           <motion.div
@@ -2853,8 +2462,8 @@ const Calendar = () => {
             style={{
               position: 'fixed',
               top: 0, left: 0, right: 0, bottom: 0,
-              background: 'rgba(0, 0, 0, 0.8)',
-              backdropFilter: 'blur(10px)',
+              background: 'rgba(9, 13, 20, 0.85)',
+              backdropFilter: 'blur(8px)',
               zIndex: 2600,
               display: 'flex',
               alignItems: 'center',
@@ -2883,82 +2492,75 @@ const Calendar = () => {
 
               return (
                 <motion.div
-                  initial={{ scale: 0.92, y: 20, opacity: 0 }}
-                  animate={{ scale: 1, y: 0, opacity: 1 }}
-                  exit={{ scale: 0.92, y: 20, opacity: 0 }}
-                  className="glass-card"
+                  initial={{ scale: 0.94, y: 15 }}
+                  animate={{ scale: 1, y: 0 }}
+                  exit={{ scale: 0.94, y: 15 }}
+                  className="card-surface"
                   style={{
                     width: '100%',
-                    maxWidth: '850px',
-                    borderRadius: '1.25rem',
-                    border: '1px solid rgba(245, 158, 11, 0.4)',
-                    background: 'linear-gradient(145deg, rgba(30, 41, 59, 0.99), rgba(15, 23, 42, 0.99))',
-                    color: '#f8fafc',
-                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.85), 0 0 35px rgba(245, 158, 11, 0.2)',
+                    maxWidth: '820px',
+                    borderRadius: 'var(--radius-lg)',
+                    border: '1px solid var(--accent-amber-border)',
+                    boxShadow: 'var(--shadow-lg)',
                     overflow: 'hidden'
                   }}
                 >
-                  {/* Modal Header */}
-                  <div style={{ padding: '1.5rem 2rem', background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.9))', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  {/* Header */}
+                  <div style={{ padding: '1.25rem 1.75rem', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.6rem', color: '#fbbf24' }}>
-                        <Sparkles size={24} /> Asistente "Ponete al Día" - Checklist por Exchange
+                      <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#FBBF24' }}>
+                        <Sparkles size={20} /> Asistente "Ponete al Día" — Checklist por Exchange
                       </h3>
-                      <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#94a3b8' }}>
-                        Resolución guiada paso a paso exchange por exchange para dejar tu contabilidad 100% al día
+                      <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                        Resolución guiada paso a paso para dejar tu sub-ledger 100% conciliado.
                       </p>
                     </div>
                     <button
                       onClick={() => setShowPonteAlDiaModal(false)}
-                      style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
                     >
-                      <X size={22} />
+                      <X size={20} />
                     </button>
                   </div>
 
-                  {/* Modal Body */}
-                  <div style={{ padding: '1.75rem 2rem' }}>
+                  {/* Body */}
+                  <div style={{ padding: '1.5rem 1.75rem' }}>
                     {isFinished ? (
-                      /* Final Celebration View */
-                      <div style={{ textAlign: 'center', padding: '2.5rem 1rem' }}>
-                        <div style={{ width: '70px', height: '70px', borderRadius: '50%', background: 'rgba(34, 197, 94, 0.15)', border: '2px solid #22c55e', color: '#4ade80', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem' }}>
-                          <CheckCircle2 size={40} />
+                      <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+                        <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'var(--accent-emerald-subtle)', border: '1px solid var(--accent-emerald-border)', color: '#34D399', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+                          <CheckCircle2 size={34} />
                         </div>
-                        <h4 style={{ fontSize: '1.4rem', color: '#f8fafc', margin: '0 0 0.5rem', fontWeight: 'bold' }}>
-                          ¡Felicitaciones! Tu Contabilidad está 100% al Día 🎉
+                        <h4 style={{ fontSize: '1.3rem', color: '#F8FAFC', margin: '0 0 0.4rem', fontWeight: 700 }}>
+                          ¡Tu Contabilidad está 100% al Día! 🎉
                         </h4>
-                        <p style={{ fontSize: '0.95rem', color: '#cbd5e1', maxWidth: '560px', margin: '0 auto 1.75rem', lineHeight: 1.5 }}>
-                          Has completado el checklist de todos los exchanges. Todos tus movimientos tienen consistencia FIFO y no quedan advertencias ni faltantes pendientes.
+                        <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', maxWidth: '520px', margin: '0 auto 1.5rem', lineHeight: 1.5 }}>
+                          Completaste el checklist de todos los exchanges. Todos tus movimientos tienen consistencia FIFO y no quedan advertencias pendientes.
                         </p>
 
-                        <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem' }}>
                           <button
                             onClick={() => setShowPonteAlDiaModal(false)}
-                            className="btn-primary"
-                            style={{ background: 'rgba(30, 41, 59, 0.8)', border: '1px solid var(--border-color)', color: '#cbd5e1', padding: '0.65rem 1.25rem' }}
+                            className="btn-outline"
                           >
                             Cerrar Asistente
                           </button>
                           <button
                             onClick={() => { setShowPonteAlDiaModal(false); navigate('/reports'); }}
                             className="btn-primary"
-                            style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', padding: '0.65rem 1.5rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                           >
-                            <FileText size={18} /> Ir a Descargar Excel Maestro →
+                            <FileText size={16} /> Ir a Descargar Excel Maestro →
                           </button>
                         </div>
                       </div>
                     ) : (
-                      /* Checklist Grid Layout (Left Panel: Exchanges List, Right Panel: Active Action Card) */
-                      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '1.5rem', alignItems: 'start' }}>
-                        
-                        {/* Left Side: Checklist Progress Bar & Exchanges Items */}
-                        <div style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid var(--border-color)', borderRadius: '0.85rem', padding: '1rem' }}>
-                          <div style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: '1.25rem', alignItems: 'start' }}>
+                        {/* Steps List */}
+                        <div style={{ background: '#0D131F', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.85rem' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.65rem' }}>
                             Pasos ({ponteAlDiaStep + 1} de {totalSteps})
                           </div>
 
-                          <div style={{ display: 'grid', gap: '0.5rem' }}>
+                          <div style={{ display: 'grid', gap: '0.4rem' }}>
                             {checklistExchanges.map((exName, idx) => {
                               const isCurrent = idx === ponteAlDiaStep;
                               const isCompleted = idx < ponteAlDiaStep || completedChecklistExchanges[exName];
@@ -2969,132 +2571,77 @@ const Calendar = () => {
                                   key={exName}
                                   onClick={() => setPonteAlDiaStep(idx)}
                                   style={{
-                                    padding: '0.65rem 0.85rem',
-                                    borderRadius: '0.55rem',
-                                    background: isCurrent ? 'rgba(56, 189, 248, 0.18)' : isCompleted ? 'rgba(34, 197, 94, 0.1)' : 'rgba(30, 41, 59, 0.5)',
-                                    border: isCurrent ? '1px solid #38bdf8' : isCompleted ? '1px solid #22c55e' : '1px solid transparent',
+                                    padding: '0.55rem 0.75rem',
+                                    borderRadius: 'var(--radius-sm)',
+                                    background: isCurrent ? 'var(--brand-indigo-subtle)' : isCompleted ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                                    border: isCurrent ? '1px solid var(--brand-indigo-border)' : isCompleted ? '1px solid var(--accent-emerald-border)' : '1px solid transparent',
                                     cursor: 'pointer',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'space-between'
                                   }}
                                 >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                                     {isCompleted ? (
-                                      <CheckCircle2 size={16} color="#4ade80" />
+                                      <CheckCircle2 size={14} color="#34D399" />
                                     ) : (
-                                      <span style={{ width: '18px', height: '18px', borderRadius: '50%', background: isCurrent ? '#38bdf8' : '#475569', color: '#0f172a', fontSize: '0.7rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                      <span style={{ width: '16px', height: '16px', borderRadius: '50%', background: isCurrent ? 'var(--brand-indigo)' : '#334155', color: '#fff', fontSize: '0.68rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                         {idx + 1}
                                       </span>
                                     )}
-                                    <span style={{ fontSize: '0.85rem', fontWeight: isCurrent ? 'bold' : '600', color: isCurrent ? '#38bdf8' : '#f8fafc' }}>
+                                    <span style={{ fontSize: '0.82rem', fontWeight: isCurrent ? 700 : 500, color: isCurrent ? 'var(--brand-indigo-light)' : '#F8FAFC' }}>
                                       {exName}
                                     </span>
                                   </div>
 
-                                  <span style={{ fontSize: '0.72rem', background: 'rgba(0,0,0,0.3)', padding: '0.1rem 0.4rem', borderRadius: '0.4rem', color: isCompleted ? '#86efac' : '#fef08a' }}>
-                                    {isCompleted ? '✓ Al día' : `${count}`}
+                                  <span style={{ fontSize: '0.68rem', color: isCompleted ? '#34D399' : 'var(--accent-amber-light)' }}>
+                                    {isCompleted ? '✓' : count}
                                   </span>
                                 </div>
                               );
                             })}
                           </div>
-
-                          <div>
-                            <input
-                              type="file"
-                              id="ponteFileInput_consolidated"
-                              multiple
-                              hidden
-                              onChange={(e) => handleInModalUpload(e.target.files)}
-                            />
-                            <button
-                              onClick={() => {
-                                const inputEl = document.getElementById('ponteFileInput_consolidated');
-                                if (inputEl) inputEl.click();
-                              }}
-                              style={{
-                                marginTop: '0.85rem',
-                                width: '100%',
-                                padding: '0.55rem',
-                                borderRadius: '0.5rem',
-                                background: 'rgba(168, 85, 247, 0.15)',
-                                border: '1px solid rgba(168, 85, 247, 0.4)',
-                                color: '#d8b4fe',
-                                fontSize: '0.78rem',
-                                fontWeight: 'bold',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '0.4rem',
-                                transition: 'all 0.2s'
-                              }}
-                            >
-                              <UploadCloud size={14} /> 📄 Cargar Planilla Varios / Consolidada
-                            </button>
-                          </div>
                         </div>
 
-
-                        {/* Right Side: Active Exchange Diagnosis & Autocomplete Actions */}
+                        {/* Active Step Actions */}
                         <div>
                           {(() => {
                             const apiExchangesList = ['binance', 'bitso', 'bitget', 'okx', 'bybit'];
                             const isApiEx = apiExchangesList.some(name => currentExName.toLowerCase().includes(name));
 
                             return (
-                              <div style={{ background: 'rgba(15, 23, 42, 0.8)', border: isApiEx ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '0.85rem', padding: '1.25rem', marginBottom: '1.25rem' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                                  <h4 style={{ margin: 0, fontSize: '1.1rem', color: isApiEx ? '#38bdf8' : '#fbbf24', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    {isApiEx ? '⚡ Exchange con Conexión API' : '📄 Exchange Sin API (Carga Manual / CSV)'}
+                              <div style={{ background: '#0D131F', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1.15rem', marginBottom: '1rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
+                                  <h4 style={{ margin: 0, fontSize: '1rem', color: isApiEx ? 'var(--brand-indigo-light)' : '#FBBF24', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                    {isApiEx ? '⚡ Exchange con Conexión API' : '📄 Exchange Sin API (Carga CSV / Manual)'}
                                   </h4>
-                                  <span className="badge badge-amber" style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>
+                                  <span className="badge badge-amber" style={{ fontSize: '0.72rem' }}>
                                     {currentExItems.length} advertencia(s)
                                   </span>
                                 </div>
 
-                                <p style={{ margin: '0 0 1.25rem 0', fontSize: '0.86rem', color: '#cbd5e1', lineHeight: '1.4' }}>
+                                <p style={{ margin: '0 0 1rem 0', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
                                   {isApiEx
-                                    ? `${currentExName} cuenta con sincronización por API. El sistema puede recuperar automáticamente las compras y depósitos faltantes sin que subas archivos.`
-                                    : `${currentExName} no dispone de API REST pública. Para resolver sus advertencias, podés subir el extracto CSV/Excel o declarar un saldo inicial.`}
+                                    ? `${currentExName} cuenta con sincronización API. El sistema puede recuperar compras y depósitos faltantes de forma automática.`
+                                    : `${currentExName} requiere cargar el extracto CSV/Excel o declarar saldos iniciales.`}
                                 </p>
 
-                                {/* Dynamic Action Buttons based on API support */}
-                                <div style={{ display: 'grid', gap: '0.75rem' }}>
+                                <div style={{ display: 'grid', gap: '0.65rem' }}>
                                   {isApiEx && (
                                     <button
                                       disabled={syncingAllApis}
                                       onClick={() => handleApiSyncForExchange(currentExName)}
                                       className="btn-primary"
-                                      style={{
-                                        background: 'linear-gradient(135deg, #38bdf8, #0284c7)',
-                                        border: 'none',
-                                        padding: '0.7rem 1rem',
-                                        fontSize: '0.85rem',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: '0.5rem',
-                                        fontWeight: '600'
-                                      }}
+                                      style={{ width: '100%', fontSize: '0.82rem' }}
                                     >
-                                      <RefreshCw size={16} className={syncingAllApis ? 'spin' : ''} />
-                                      {syncingAllApis ? 'Sincronizando...' : `⚡ Auto-Sincronizar API de ${currentExName}`}
+                                      <RefreshCw size={14} className={syncingAllApis ? 'spin' : ''} />
+                                      {syncingAllApis ? 'Sincronizando...' : `⚡ Sincronizar API de ${currentExName}`}
                                     </button>
                                   )}
 
-                                  {/* In-Modal Interactive Dropzone for currentExName */}
                                   <div
-                                    style={{
-                                      border: '2px dashed #0284c7',
-                                      borderRadius: '0.65rem',
-                                      padding: '1rem',
-                                      textAlign: 'center',
-                                      background: 'rgba(2, 132, 199, 0.05)',
-                                      cursor: 'pointer',
-                                      transition: 'all 0.2s'
-                                    }}
+                                    className="upload-zone-refined"
+                                    style={{ padding: '0.85rem' }}
                                     onClick={() => {
                                       const inputEl = document.getElementById(`ponteFileInput_${currentExName}`);
                                       if (inputEl) inputEl.click();
@@ -3114,23 +2661,19 @@ const Calendar = () => {
                                       hidden
                                       onChange={(e) => handleInModalUpload(e.target.files)}
                                     />
-                                    <UploadCloud size={30} color="#38bdf8" style={{ marginBottom: '0.3rem' }} />
-                                    <div style={{ fontSize: '0.86rem', color: '#f8fafc', fontWeight: 'bold' }}>
-                                      📄 Arrastrá o hacé clic para cargar Extracto CSV / Excel de {currentExName}
-                                    </div>
-                                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.2rem' }}>
-                                      Se importará directamente sin cerrar esta ventana.
+                                    <div style={{ fontSize: '0.82rem', color: '#F8FAFC', fontWeight: 600 }}>
+                                      📄 Subir Extracto CSV / Excel de {currentExName}
                                     </div>
                                   </div>
 
                                   {inModalUploading && (
-                                    <div style={{ textAlign: 'center', color: '#38bdf8', fontSize: '0.85rem', fontWeight: 'bold' }}>
-                                      ⏳ Procesando e importando transacciones al sistema...
+                                    <div style={{ textAlign: 'center', color: 'var(--brand-indigo-light)', fontSize: '0.8rem' }}>
+                                      ⏳ Procesando archivo...
                                     </div>
                                   )}
 
                                   {inModalUploadMsg && (
-                                    <div style={{ fontSize: '0.85rem', color: inModalUploadMsg.type === 'success' ? '#4ade80' : '#fca5a5', textAlign: 'center', fontWeight: 'bold', background: 'rgba(0,0,0,0.3)', padding: '0.5rem', borderRadius: '0.4rem' }}>
+                                    <div style={{ fontSize: '0.8rem', color: inModalUploadMsg.type === 'success' ? '#34D399' : '#FB7185', textAlign: 'center' }}>
                                       {inModalUploadMsg.text}
                                     </div>
                                   )}
@@ -3141,21 +2684,10 @@ const Calendar = () => {
                                         setShowPonteAlDiaModal(false);
                                         openResolverModal(currentExItems[0]);
                                       }}
-                                      className="btn-primary"
-                                      style={{
-                                        background: 'rgba(245, 158, 11, 0.15)',
-                                        border: '1px solid rgba(245, 158, 11, 0.4)',
-                                        color: '#fbbf24',
-                                        padding: '0.65rem 1rem',
-                                        fontSize: '0.85rem',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: '0.5rem',
-                                        fontWeight: '600'
-                                      }}
+                                      className="chip active-amber"
+                                      style={{ justifyContent: 'center', padding: '0.5rem' }}
                                     >
-                                      <Wand2 size={16} /> ✏️ Ajuste Manual / Saldo Inicial para {currentExName}
+                                      <Wand2 size={14} /> Ajuste Manual / Saldo Inicial para {currentExName}
                                     </button>
                                   )}
                                 </div>
@@ -3163,16 +2695,15 @@ const Calendar = () => {
                             );
                           })()}
 
-                          {/* Navigation Buttons */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <button
                               type="button"
                               disabled={ponteAlDiaStep === 0}
                               onClick={() => setPonteAlDiaStep((prev) => Math.max(0, prev - 1))}
-                              className="btn-primary"
-                              style={{ background: '#334155', fontSize: '0.82rem', opacity: ponteAlDiaStep === 0 ? 0.5 : 1 }}
+                              className="btn-outline"
+                              style={{ fontSize: '0.78rem', padding: '0.45rem 0.85rem', opacity: ponteAlDiaStep === 0 ? 0.4 : 1 }}
                             >
-                              Anterior Exchange
+                              Anterior
                             </button>
 
                             <button
@@ -3182,9 +2713,9 @@ const Calendar = () => {
                                 setPonteAlDiaStep((prev) => prev + 1);
                               }}
                               className="btn-primary"
-                              style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', fontSize: '0.85rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                              style={{ background: 'linear-gradient(135deg, #10B981, #059669)', fontSize: '0.82rem' }}
                             >
-                              Marcar {currentExName} al Día <CheckCircle2 size={16} />
+                              Marcar {currentExName} al Día <CheckCircle2 size={14} />
                             </button>
                           </div>
                         </div>
@@ -3198,48 +2729,47 @@ const Calendar = () => {
         )}
       </AnimatePresence>
 
-      {/* Sleek Floating Glassmorphism Toast Notification */}
+      {/* Floating Toast Notification */}
       <AnimatePresence>
         {toast.show && (
           <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.9 }}
+            initial={{ opacity: 0, y: -20, scale: 0.92 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.9 }}
+            exit={{ opacity: 0, y: -20, scale: 0.92 }}
             style={{
               position: 'fixed',
-              top: '1.5rem',
-              right: '1.5rem',
+              top: '1.25rem',
+              right: '1.25rem',
               zIndex: 9999,
-              background: toast.type === 'success' 
-                ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.95), rgba(22, 101, 52, 0.98))'
+              background: toast.type === 'success'
+                ? '#059669'
                 : toast.type === 'error'
-                ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.95), rgba(153, 27, 27, 0.98))'
+                ? '#DC2626'
                 : toast.type === 'warning'
-                ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.95), rgba(180, 83, 9, 0.98))'
-                : 'linear-gradient(135deg, rgba(56, 189, 248, 0.95), rgba(30, 58, 138, 0.98))',
-              color: '#ffffff',
-              padding: '0.85rem 1.35rem',
-              borderRadius: '0.85rem',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(56, 189, 248, 0.3)',
+                ? '#D97706'
+                : '#4F46E5',
+              color: '#FFFFFF',
+              padding: '0.75rem 1.25rem',
+              borderRadius: 'var(--radius-md)',
+              boxShadow: 'var(--shadow-lg)',
               border: '1px solid rgba(255, 255, 255, 0.2)',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.75rem',
-              fontSize: '0.9rem',
-              fontWeight: 600,
-              backdropFilter: 'blur(10px)'
+              gap: '0.65rem',
+              fontSize: '0.85rem',
+              fontWeight: 600
             }}
           >
-            {toast.type === 'success' && <CheckCircle2 size={20} />}
-            {toast.type === 'error' && <AlertTriangle size={20} />}
-            {toast.type === 'warning' && <AlertTriangle size={20} />}
-            {toast.type === 'info' && <Sparkles size={20} />}
+            {toast.type === 'success' && <CheckCircle2 size={18} />}
+            {toast.type === 'error' && <AlertTriangle size={18} />}
+            {toast.type === 'warning' && <AlertTriangle size={18} />}
+            {toast.type === 'info' && <Sparkles size={18} />}
             <span>{toast.message}</span>
             <button
               onClick={() => setToast({ show: false, message: '', type: 'info' })}
-              style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', opacity: 0.8, marginLeft: '0.5rem' }}
+              style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', opacity: 0.8, marginLeft: '0.35rem' }}
             >
-              <X size={16} />
+              <X size={14} />
             </button>
           </motion.div>
         )}
